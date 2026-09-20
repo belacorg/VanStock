@@ -20,6 +20,10 @@ self.addEventListener('install', e => {
       BASE + '/style.css',
       BASE + '/fonts.css',
       BASE + '/fonts/DMSans-latin.woff2',
+      // The barcode reader. Precached rather than fetched on demand: the scan
+      // an engineer most needs is the one in a cellar with no signal, and a
+      // reader that only arrives online is no reader at all.
+      BASE + '/vendor/zxing.min.js',
       BASE + '/manifest.json',
       BASE + '/icons/icon-192.png',
       BASE + '/icons/icon-512.png',

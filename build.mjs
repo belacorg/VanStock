@@ -21,6 +21,7 @@ const SHIP = [
   'style.css',
   'fonts.css',
   'fonts',
+  'vendor',
   'sw.js',
   'manifest.json',
   'icons',

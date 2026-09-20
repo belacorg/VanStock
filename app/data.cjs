@@ -109,6 +109,15 @@ function gcFromBarcode(payload, myId) {
   return null;
 }
 
+// What to do with a code once it has been read off a label. Kept here, away
+// from the camera plumbing, because this is the part with a decision in it.
+function scanRoute(gc, parts) {
+  if (!gc) return { kind: 'unreadable' };
+  const norm = normaliseNumber(gc);
+  const part = (parts || []).find(p => normaliseNumber(p.number) === norm);
+  return part ? { kind: 'found', part } : { kind: 'new', gc: norm };
+}
+
 // ── Search ──────────────────────────────────────────────────────────────────
 
 // Ranked, lowest first. The ordering is the whole point: an engineer who typed
@@ -359,6 +368,7 @@ if (typeof module !== 'undefined' && module.exports) {
     GC_PATTERN,
     isGcCode,
     gcFromBarcode,
+    scanRoute,
     CHASE_AFTER_DAYS,
     STALE_AFTER_DAYS,
     normaliseNumber,

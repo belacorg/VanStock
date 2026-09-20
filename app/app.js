@@ -20,6 +20,8 @@ let lendSheet = null;       // { partId, to, phone, qty, on } | null
 let boxSheet = null;        // { mode: 'add'|'edit', id, label } | null
 let eraseStep = 'idle';
 let showReturned = false;
+// The scan in progress. Out of `state` because it holds a photograph.
+let scanSheet = null;   // { status, message, gc, src } | null
 
 function blankState() {
   return {
@@ -35,7 +37,9 @@ function blankState() {
     parts: [],
     loans: [],
     engineers: [],          // { name, phone } — so a lent part can be rung for
-    settings: { remindAfter: 4, theme: 'dark' },
+    // staffId is the engineer's own payroll number, used only to tell the GC
+    // barcode from the tracking and tote barcodes beside it on a label.
+    settings: { remindAfter: 4, theme: 'dark', staffId: '' },
   };
 }
 
@@ -143,6 +147,8 @@ function buildApp() {
     ${buildPartSheet()}
     ${buildLendSheet()}
     ${buildBoxSheet()}
+    ${buildScanSheet()}
+    <input type="file" id="scan-file" accept="image/*" capture="environment" style="display:none">
     <div class="toast" id="toast"></div>
   `;
 }
@@ -213,7 +219,10 @@ function buildFind() {
                value="${esc(query)}">
         ${typed ? '<button class="find-clear" id="find-clear" aria-label="Clear">&times;</button>' : ''}
       </div>
-      ${typed ? '' : '<div class="find-hint">The GC number off the label, or type what it is — &ldquo;powerhead valve&rdquo;.</div>'}
+      <label class="btn btn-quiet btn-block scan-btn" for="scan-file">
+        ${ICON_CAMERA}<span>Scan the label</span>
+      </label>
+      ${typed ? '' : '<div class="find-hint">Type the GC number, or what it is — &ldquo;powerhead valve&rdquo;. Scanning reads the barcode at the bottom right of the label, so aim at that rather than the whole box.</div>'}
     </div>
     ${typed ? buildFindResults(results, typed) : buildFindHome()}
   `;
@@ -526,6 +535,16 @@ function buildSettings() {
     </div>
     <div class="field-hint" style="margin:6px 2px 0">Labels are optional. &ldquo;Box 3&rdquo; is a fine name if that's what's written on the lid.</div>
 
+    <div class="section-label">Scanning</div>
+    <div class="card">
+      <div class="field" style="margin-bottom:0">
+        <label class="field-label" for="staff-id">Your staff ID</label>
+        <input class="field-input num" id="staff-id" inputmode="numeric" autocomplete="off"
+               placeholder="0000002" value="${esc(state.settings.staffId || '')}">
+        <div class="field-hint">A label carries four or five barcodes and the camera finds whichever it sees first. The GC one is the only one ending in your own staff ID — it's on every label next to your name. Leave it blank and scanning still works, just with one less way to tell the right barcode from the rest.</div>
+      </div>
+    </div>
+
     <div class="section-label">Reminders</div>
     <div class="card">
       <div class="field">
@@ -736,6 +755,198 @@ function buildBoxSheet() {
           <button class="btn btn-danger btn-block" data-delete-box="${boxSheet.id}" style="margin-top:10px">Delete box</button>
           ${inUse ? `<div class="field-hint" style="margin-top:8px">${inUse} line${inUse === 1 ? '' : 's'} sit in this box. Deleting it leaves them unboxed — the parts stay on the list.</div>` : ''}
         ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+// ── Reading the label ───────────────────────────────────────────────────────
+//
+// Every dispatch label carries the GC code in its bottom-right barcode,
+// followed by the staff ID of the engineer it was picked for: 612340 +
+// 0000001. Reading that is exact where reading print is a guess.
+//
+// The hard part is not decoding, it is resolution. Photograph the whole box
+// and the barcode lands about 300 pixels wide and skewed, which is not enough
+// bar detail to recover — tested against five real labels, where only the
+// large flat tracking barcode came back. Aimed at, filling the frame, it is
+// several times that. So the instruction is aim at the barcode, not the label,
+// and everything below is built to fail honestly when it cannot read one.
+
+const ZXING_SRC = 'vendor/zxing.min.js';
+let _zxingLoading = null;
+
+// 336KB, so it loads on the first scan rather than on every cold start of an
+// app whose whole point is answering in the time it takes to type six digits.
+function loadZxing() {
+  if (window.ZXing) return Promise.resolve(window.ZXing);
+  if (_zxingLoading) return _zxingLoading;
+  _zxingLoading = new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = ZXING_SRC;
+    el.onload = () => (window.ZXing ? resolve(window.ZXing) : reject(new Error('reader did not load')));
+    el.onerror = () => reject(new Error('reader did not load'));
+    document.head.appendChild(el);
+  });
+  return _zxingLoading;
+}
+
+// Big enough to keep the bars separable, small enough that a 12MP photograph
+// does not put 48MB of pixels on the heap of a phone in a cold van.
+const SCAN_MAX_W = 2400;
+
+function imageToGrey(img) {
+  const scale = Math.min(1, SCAN_MAX_W / img.naturalWidth);
+  const w = Math.round(img.naturalWidth * scale);
+  const h = Math.round(img.naturalHeight * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, w, h);
+  const rgba = ctx.getImageData(0, 0, w, h).data;
+  const grey = new Uint8ClampedArray(w * h);
+  for (let i = 0, p = 0; i < rgba.length; i += 4, p++) {
+    grey[p] = (306 * rgba[i] + 601 * rgba[i + 1] + 117 * rgba[i + 2] + 512) >> 10;
+  }
+  return { grey, w, h };
+}
+
+function cropGrey(grey, w, h, x0, y0, cw, ch) {
+  const out = new Uint8ClampedArray(cw * ch);
+  for (let y = 0; y < ch; y++) {
+    const from = (y0 + y) * w + x0;
+    out.set(grey.subarray(from, from + cw), y * cw);
+  }
+  return out;
+}
+
+function decodeRegion(Z, grey, w, h) {
+  const hints = new Map();
+  hints.set(Z.DecodeHintType.TRY_HARDER, true);
+  const out = [];
+  // Two binarizers because they fail on opposite things: the adaptive one on
+  // even, low-contrast print, the global one on a label half in shadow.
+  for (const Bin of [Z.HybridBinarizer, Z.GlobalHistogramBinarizer]) {
+    try {
+      const reader = new Z.MultiFormatReader();
+      reader.setHints(hints);
+      const src = new Z.RGBLuminanceSource(grey, w, h);
+      out.push(reader.decode(new Z.BinaryBitmap(new Bin(src)), hints).getText());
+    } catch (e) { /* this binarizer found nothing */ }
+  }
+  return out;
+}
+
+// Regions in the order they are worth trying: the middle band, because that is
+// where an engineer aiming at a barcode will have put it; then the whole frame;
+// then halves, for a photograph taken in a hurry. Stops the moment a payload
+// turns out to be a GC barcode rather than a tracking or tote one.
+function readGcFromImage(Z, img, myId) {
+  const { grey, w, h } = imageToGrey(img);
+  const bands = [
+    [0, Math.floor(h * 0.30), w, Math.floor(h * 0.40)],
+    [0, 0, w, h],
+    [0, 0, w, Math.floor(h / 2)],
+    [0, Math.floor(h / 2), w, h - Math.floor(h / 2)],
+  ];
+  const seen = [];
+  for (const [x, y, bw, bh] of bands) {
+    if (bw < 40 || bh < 20) continue;
+    const region = (x === 0 && y === 0 && bw === w && bh === h) ? grey : cropGrey(grey, w, h, x, y, bw, bh);
+    for (const text of decodeRegion(Z, region, bw, bh)) {
+      seen.push(text);
+      const gc = gcFromBarcode(text, myId);
+      if (gc) return { gc, seen };
+    }
+  }
+  return { gc: null, seen };
+}
+
+function runScan(file) {
+  scanSheet = { status: 'reading', message: '', gc: '', src: '' };
+  render();
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      loadZxing()
+        .then(Z => {
+          const { gc, seen } = readGcFromImage(Z, img, state.settings.staffId);
+          finishScan(gc, seen, String(reader.result));
+        })
+        .catch(() => {
+          scanSheet = { status: 'failed', message: 'The barcode reader could not load. Go online once and it will be there from then on.', gc: '', src: '' };
+          render();
+        });
+    };
+    img.onerror = () => {
+      scanSheet = { status: 'failed', message: "That photo could not be opened.", gc: '', src: '' };
+      render();
+    };
+    img.src = String(reader.result);
+  };
+  reader.onerror = () => {
+    scanSheet = { status: 'failed', message: "That photo could not be opened.", gc: '', src: '' };
+    render();
+  };
+  reader.readAsDataURL(file);
+}
+
+function finishScan(gc, seen, src) {
+  const route = scanRoute(gc, state.parts);
+
+  if (route.kind === 'found') {
+    scanSheet = null;
+    query = route.part.number;
+    activeTab = 'find';
+    toast('Read ' + route.part.number);
+    render();
+    return;
+  }
+
+  if (route.kind === 'new') {
+    scanSheet = null;
+    openPartSheet('add', null);
+    partSheet.draft.number = route.gc;
+    toast('Read ' + route.gc + ' — not on the van yet');
+    render();
+    return;
+  }
+
+  // Nothing usable. Saying which barcodes *were* read is the difference
+  // between "it is broken" and "you have aimed at the wrong one".
+  const other = seen.filter(Boolean).length;
+  scanSheet = {
+    status: 'failed',
+    gc: '',
+    src,
+    message: other
+      ? 'Read ' + other + ' barcode' + (other === 1 ? '' : 's') + ' on that label, but none of them was the GC one. It is the barcode at the bottom right, under the returns grid.'
+      : "Couldn't read a barcode. Get closer — the barcode wants to fill the frame on its own, not the whole label.",
+  };
+  render();
+}
+
+function buildScanSheet() {
+  if (!scanSheet) return '';
+  const reading = scanSheet.status === 'reading';
+  return `
+    <div class="modal-overlay" data-close-sheet="scan">
+      <div class="modal" data-stop="1">
+        <h3>${reading ? 'Reading the label' : "Couldn't read it"}</h3>
+        ${reading ? `
+          <div class="modal-note">Looking for the GC barcode.</div>
+          <div class="scan-working"><span class="scan-spinner"></span></div>
+        ` : `
+          <div class="modal-note">${esc(scanSheet.message)}</div>
+          ${scanSheet.src ? `<img src="${scanSheet.src}" alt="The photo you took" class="scan-shot">` : ''}
+          <div class="modal-btns">
+            <button class="btn-cancel" data-close-sheet="scan">Type it instead</button>
+            <label class="btn-confirm" for="scan-file" style="text-align:center;line-height:1.4">Try again</label>
+          </div>
+        `}
       </div>
     </div>
   `;
@@ -991,6 +1202,7 @@ function attachListeners() {
     if (which === 'part') partSheet = null;
     if (which === 'lend') lendSheet = null;
     if (which === 'box')  boxSheet = null;
+    if (which === 'scan') scanSheet = null;
     render();
   });
   on('[data-stop]', 'click', e => e.stopPropagation());
@@ -1020,6 +1232,20 @@ function attachListeners() {
     render();
   });
   on('[data-save-lend]', 'click', saveLendFromSheet);
+
+  const scanFile = document.getElementById('scan-file');
+  if (scanFile) scanFile.addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    // Cleared so photographing the same label twice still fires a change.
+    e.target.value = '';
+    if (f) runScan(f);
+  });
+
+  const staffId = document.getElementById('staff-id');
+  if (staffId) staffId.addEventListener('change', e => {
+    state.settings.staffId = normaliseNumber(e.target.value);
+    save();
+  });
 
   on('[data-add-box]', 'click', () => { boxSheet = { mode: 'add', id: null, label: '' }; render(); });
   on('[data-edit-box]', 'click', e => {
@@ -1116,6 +1342,7 @@ function stashLendSheetFields() {
 const ICON_SEARCH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>';
 const ICON_BOX    = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg>';
 const ICON_HAND   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12V7a2 2 0 0 1 4 0v4"/><path d="M8 11V5a2 2 0 0 1 4 0v6"/><path d="M12 11V6a2 2 0 0 1 4 0v6"/><path d="M16 9a2 2 0 0 1 4 0v5a7 7 0 0 1-7 7h-1a8 8 0 0 1-8-8"/></svg>';
+const ICON_CAMERA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.8a1 1 0 0 0 .84-.46l.9-1.4A1 1 0 0 1 9.9 3.7h4.2a1 1 0 0 1 .84.44l.9 1.4a1 1 0 0 0 .85.46h1.8A2.5 2.5 0 0 1 21 8.5v9A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.4"/></svg>';
 const ICON_COG    = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.6.76 1 1.4 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
 
 // ── Boot ────────────────────────────────────────────────────────────────────
