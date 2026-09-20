@@ -23,11 +23,15 @@ Nothing is read off the print. The description is typed once, when the part firs
 
 The reader is vendored and precached rather than fetched from a CDN, for the same reason the typeface is (ADR-0006).
 
+The trailing staff ID is a *ranking signal*, never a filter. It is the ID of the engineer the part was picked **for**, which is not this engineer whenever the part was lent to them — and those are exactly the parts the lending half of this app exists for. Candidates are scored: a staff ID the app has met before, a GC code already on the van, and a leading zero on the ID, in that order of weight. One candidate, or a clear winner, is an answer; a genuine tie is a question put to the engineer, and their answer teaches the app another staff ID.
+
 ## Consequences
 A read is exact or absent — there is no confidently wrong answer, which is the failure mode that would matter most in a stock list.
 
 The engineer must aim at the barcode rather than the label. Photographed the ordinary way, with the whole box in frame, the GC barcode lands around 300 pixels wide and skewed; across five real photographs exactly one barcode decoded, and it was the large flat tracking code on a return label. Filling the frame with the barcode is several times that resolution. The copy says so, and a failed scan says which of the two mistakes was made — other barcodes read means the wrong one was aimed at, none read means too far away.
 
 Whether that instruction is enough in a cold van in November is not yet known, and cannot be settled from photographs taken for another purpose. It is the first thing to find out in the field.
+
+Shape alone could not have carried this. A ByBox tracking number runs to thirteen digits, so "six characters of code then seven of staff ID" fits it exactly and yields a stock code that never existed — the kind of confident wrong answer that puts a tracking number on the stock list as though it were a part. The ranking is what separates them, and the learned staff IDs are what makes it decisive after the first scan from any given engineer.
 
 Reading only the GC code also keeps the customer's name, site and address on these labels out of the app entirely, which is right for a stock list whatever the storage rules say.

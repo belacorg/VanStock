@@ -18,6 +18,9 @@ _Avoid_: "part number" (ambiguous with the manufacturer's own), "SKU", "product 
 **Manufacturer number**:
 The number moulded into or printed on the part itself — eleven digits for Worcester, ten for Vaillant. Not what the app is organised around, but held against a line in `alt` so a part whose label has come off can still be found.
 
+**Picked for**:
+The engineer a part was issued to, identified by the seven-digit staff ID in the GC barcode. **Not necessarily the engineer holding the part** — one lent to you arrives on the lender's label, carrying the lender's ID. The app uses it to tell the GC barcode from the tracking barcode beside it, never to decide whose part it is.
+
 **Desc**:
 The part description on the dispatch label, straight under the **GC number**. Free text as the warehouse wrote it: "Powerhead for V4073A Valves", "(H) Hive Active Plug SLP3".
 

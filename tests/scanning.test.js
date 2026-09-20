@@ -59,16 +59,29 @@ describe('the staff ID', () => {
     expect(app.state().settings.staffId).toBe('0000002');
   });
 
-  it('is optional — scanning still has a fallback without it', () => {
+  it('is optional — the ranking still separates the barcodes without it', () => {
     const app = bootApp({ storage: { vs_state: seedState() } });
     expect(app.state().settings.staffId).toBe('');
-    expect(data.gcFromBarcode('6123400000001')).toBe('612340');
+    const pick = data.pickGcCandidate(['1616009876543', '6199000000002'], { knownIds: [], parts: [] });
+    expect(pick.candidate.gc).toBe('619900');
   });
 
-  // Somebody else's label is not this engineer's stock.
-  it('refuses a label picked for another engineer once it is set', () => {
-    expect(data.gcFromBarcode('6123400000001', '0000002')).toBe(null);
-    expect(data.gcFromBarcode('6123400000001', '0000001')).toBe('612340');
+  // A part lent to you arrives on the lender's label with the lender's pay ID
+  // on it. Treating the engineer's own ID as a filter refused exactly those.
+  it('never refuses a label just because it was picked for someone else', () => {
+    const mine = '0000002';
+    const theirs = data.pickGcCandidate(['6123400000001'], { knownIds: [mine], parts: [] });
+    expect(theirs.kind).toBe('one');
+    expect(theirs.candidate.gc).toBe('612340');
+  });
+
+  // Settings is where the old rule was written down in plain English, so it is
+  // where the wrong idea would survive a correct implementation.
+  it('says in Settings that a borrowed part carries the other engineer\u2019s ID', () => {
+    const app = bootApp({ storage: { vs_state: seedState() } });
+    app.click('[data-tab="settings"]');
+    expect(app.text()).toContain('lends you carries');
+    expect(app.text()).not.toContain('the only one ending in your own staff ID');
   });
 });
 

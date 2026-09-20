@@ -26,41 +26,94 @@ describe('GC codes', () => {
 });
 
 describe('reading the GC off the label barcode', () => {
+  const MINE = '0000002';
+
   // The bottom-right barcode is the GC code followed by the staff ID of the
   // engineer the part was picked for: 612340 + 0000001.
   it('takes the code off the front and the engineer off the back', () => {
-    expect(data.gcFromBarcode('6123400000001', '0000001')).toBe('612340');
-    expect(data.gcFromBarcode('J612300000002', '0000002')).toBe('J61230');
+    expect(data.gcCandidate('6123400000001')).toMatchObject({ gc: '612340', pickedFor: '0000001' });
+    expect(data.gcCandidate('J612300000002')).toMatchObject({ gc: 'J61230', pickedFor: '0000002' });
   });
 
-  // A label carries four or five barcodes and a camera finds whichever it
-  // sees first. The staff ID is what tells the right one from the rest.
-  it('ignores the tracking and tote barcodes', () => {
-    const myId = '0000002';
-    expect(data.gcFromBarcode('1200000000000000000000000001', myId)).toBe(null);
-    expect(data.gcFromBarcode('21000002', myId)).toBe(null);
-    expect(data.gcFromBarcode('1616009876543', myId)).toBe(null);
+  it('ignores anything that is not the right shape', () => {
+    for (const junk of ['', null, undefined, 'hello', '12', '1200000000000000000000000001', '21000002']) {
+      expect(data.gcCandidate(junk)).toBe(null);
+    }
   });
 
-  // Somebody else's label is not this engineer's part. Better to read nothing
-  // than to add a line for stock that was never on the van.
-  it('refuses a label picked for another engineer', () => {
-    expect(data.gcFromBarcode('6123400000001', '0000002')).toBe(null);
+  // THE ONE THAT MATTERS. A part another engineer lends you arrives on THEIR
+  // label, carrying THEIR pay ID. An earlier version required the trailing ID
+  // to be the engineer's own and so refused every borrowed part — precisely
+  // the parts the lending half of this app exists for.
+  it('reads a label picked for another engineer', () => {
+    const pick = data.pickGcCandidate(['6123400000001'], { knownIds: [MINE], parts: [] });
+    expect(pick.kind).toBe('one');
+    expect(pick.candidate.gc).toBe('612340');
+    expect(pick.candidate.pickedFor).toBe('0000001');
   });
 
-  it('falls back on the shape of the payload when no staff ID is set', () => {
-    expect(data.gcFromBarcode('6123400000001')).toBe('612340');
-    expect(data.gcFromBarcode('1200000000000000000000000001')).toBe(null);
+  // But the shape alone cannot be trusted: a ByBox tracking number runs to
+  // thirteen digits too, and then "six of code, seven of ID" fits it perfectly
+  // and yields a stock code that never existed.
+  it('prefers a real GC barcode over a tracking number of the same shape', () => {
+    const both = ['1616009876543', '6199000000002'];
+    const pick = data.pickGcCandidate(both, { knownIds: [MINE], parts: [] });
+    expect(pick.kind).toBe('one');
+    expect(pick.candidate.gc).toBe('619900');
+  });
+
+  it('still separates them when the code is already on the van', () => {
+    const pick = data.pickGcCandidate(['1616009876543', '6123400000001'], {
+      knownIds: [], parts: [{ number: '612340' }],
+    });
+    expect(pick.candidate.gc).toBe('612340');
+  });
+
+  it('asks rather than guesses when it genuinely cannot tell', () => {
+    const pick = data.pickGcCandidate(['1616009876543', '1234567654321'], { knownIds: [], parts: [] });
+    expect(pick.kind).toBe('ambiguous');
+    expect(pick.candidates).toHaveLength(2);
+  });
+
+  it('reads nothing as nothing', () => {
+    expect(data.pickGcCandidate([], { knownIds: [MINE] }).kind).toBe('none');
+    expect(data.pickGcCandidate(['21000002'], {}).kind).toBe('none');
   });
 
   it('survives whatever punctuation the reader hands back', () => {
-    expect(data.gcFromBarcode(' 612340-0000001 ', '0000001')).toBe('612340');
+    expect(data.gcCandidate(' 612340-0000001 ').gc).toBe('612340');
+  });
+});
+
+describe('learning the staff IDs it meets', () => {
+  // The second label from an engineer you borrow from should not have to be
+  // asked about. One confirmed scan is the app being told.
+  it('remembers an ID, newest first, without duplicating it', () => {
+    let known = [];
+    known = data.rememberStaffId(known, '0000001');
+    known = data.rememberStaffId(known, '0000003');
+    known = data.rememberStaffId(known, '0000001');
+    expect(known).toEqual(['0000001', '0000003']);
   });
 
-  it('returns null rather than a guess for anything it cannot place', () => {
-    for (const junk of ['', null, undefined, 'hello', '12']) {
-      expect(data.gcFromBarcode(junk, '0000002')).toBe(null);
-    }
+  it('turns an ambiguous label into a clear one once the ID is known', () => {
+    const both = ['1616009876543', '6123400000001'];
+    expect(data.pickGcCandidate(both, { knownIds: [], parts: [] }).candidate.gc).toBe('612340');
+
+    const learned = data.rememberStaffId([], '9876543');   // suppose it went the other way
+    const pick = data.pickGcCandidate(both, { knownIds: learned, parts: [] });
+    expect(pick.candidate.gc).toBe('161600');
+  });
+
+  it('does not grow without bound', () => {
+    let known = [];
+    for (let i = 0; i < data.MAX_KNOWN_IDS + 15; i++) known = data.rememberStaffId(known, String(1000000 + i));
+    expect(known).toHaveLength(data.MAX_KNOWN_IDS);
+  });
+
+  it('ignores an empty ID rather than storing a blank', () => {
+    expect(data.rememberStaffId(['0000001'], '')).toEqual(['0000001']);
+    expect(data.rememberStaffId(['0000001'], null)).toEqual(['0000001']);
   });
 });
 

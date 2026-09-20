@@ -37,6 +37,9 @@ function blankState() {
     parts: [],
     loans: [],
     engineers: [],          // { name, phone } — so a lent part can be rung for
+    // Staff IDs the app has met, newest first. Grown by scans going through,
+    // which is how it learns the pay IDs of the engineers it borrows from.
+    knownIds: [],
     // staffId is the engineer's own payroll number, used only to tell the GC
     // barcode from the tracking and tote barcodes beside it on a label.
     settings: { remindAfter: 4, theme: 'dark', staffId: '' },
@@ -57,6 +60,7 @@ function loadState() {
       parts: Array.isArray(parsed.parts) ? parsed.parts : [],
       loans: Array.isArray(parsed.loans) ? parsed.loans : [],
       engineers: Array.isArray(parsed.engineers) ? parsed.engineers : [],
+      knownIds: Array.isArray(parsed.knownIds) ? parsed.knownIds : [],
     };
   } catch {
     return blankState();
@@ -541,7 +545,7 @@ function buildSettings() {
         <label class="field-label" for="staff-id">Your staff ID</label>
         <input class="field-input num" id="staff-id" inputmode="numeric" autocomplete="off"
                placeholder="0000002" value="${esc(state.settings.staffId || '')}">
-        <div class="field-hint">A label carries four or five barcodes and the camera finds whichever it sees first. The GC one is the only one ending in your own staff ID — it's on every label next to your name. Leave it blank and scanning still works, just with one less way to tell the right barcode from the rest.</div>
+        <div class="field-hint">A label carries four or five barcodes and more than one can look like a stock code. The GC barcode ends in the staff ID of whoever the part was picked for, so knowing yours helps the app pick the right one — it's on every label next to your name.<br><br>A part another engineer lends you carries <b>their</b> ID, not yours, and those scan perfectly well. The app remembers every ID it meets, so the second label from the same engineer never needs asking about.</div>
       </div>
     </div>
 
@@ -840,9 +844,12 @@ function decodeRegion(Z, grey, w, h) {
 
 // Regions in the order they are worth trying: the middle band, because that is
 // where an engineer aiming at a barcode will have put it; then the whole frame;
-// then halves, for a photograph taken in a hurry. Stops the moment a payload
-// turns out to be a GC barcode rather than a tracking or tote one.
-function readGcFromImage(Z, img, myId) {
+// then halves, for a photograph taken in a hurry.
+//
+// A region is taken as a whole. Everything it decodes is ranked together, so
+// a frame that catches the tracking barcode beside the GC one gets a choice
+// made between them rather than whichever came back first.
+function readGcFromImage(Z, img) {
   const { grey, w, h } = imageToGrey(img);
   const bands = [
     [0, Math.floor(h * 0.30), w, Math.floor(h * 0.40)],
@@ -850,21 +857,28 @@ function readGcFromImage(Z, img, myId) {
     [0, 0, w, Math.floor(h / 2)],
     [0, Math.floor(h / 2), w, h - Math.floor(h / 2)],
   ];
+  const opts = { knownIds: knownStaffIds(), parts: state.parts };
   const seen = [];
+
   for (const [x, y, bw, bh] of bands) {
     if (bw < 40 || bh < 20) continue;
     const region = (x === 0 && y === 0 && bw === w && bh === h) ? grey : cropGrey(grey, w, h, x, y, bw, bh);
-    for (const text of decodeRegion(Z, region, bw, bh)) {
-      seen.push(text);
-      const gc = gcFromBarcode(text, myId);
-      if (gc) return { gc, seen };
-    }
+    const payloads = decodeRegion(Z, region, bw, bh);
+    for (const t of payloads) seen.push(t);
+    const pick = pickGcCandidate(payloads, opts);
+    if (pick.kind !== 'none') return { pick, seen };
   }
-  return { gc: null, seen };
+  return { pick: { kind: 'none', candidates: [] }, seen };
+}
+
+// The engineer's own ID first, then every other one a scan has confirmed.
+function knownStaffIds() {
+  const own = normaliseNumber(state.settings.staffId);
+  return own ? [own].concat(state.knownIds || []) : (state.knownIds || []);
 }
 
 function runScan(file) {
-  scanSheet = { status: 'reading', message: '', gc: '', src: '' };
+  scanSheet = { status: 'reading', message: '', candidates: [], src: '' };
   render();
 
   const reader = new FileReader();
@@ -873,45 +887,38 @@ function runScan(file) {
     img.onload = () => {
       loadZxing()
         .then(Z => {
-          const { gc, seen } = readGcFromImage(Z, img, state.settings.staffId);
-          finishScan(gc, seen, String(reader.result));
+          const { pick, seen } = readGcFromImage(Z, img);
+          finishScan(pick, seen, String(reader.result));
         })
         .catch(() => {
-          scanSheet = { status: 'failed', message: 'The barcode reader could not load. Go online once and it will be there from then on.', gc: '', src: '' };
+          scanSheet = { status: 'failed', message: 'The barcode reader could not load. Go online once and it will be there from then on.', candidates: [], src: '' };
           render();
         });
     };
     img.onerror = () => {
-      scanSheet = { status: 'failed', message: "That photo could not be opened.", gc: '', src: '' };
+      scanSheet = { status: 'failed', message: "That photo could not be opened.", candidates: [], src: '' };
       render();
     };
     img.src = String(reader.result);
   };
   reader.onerror = () => {
-    scanSheet = { status: 'failed', message: "That photo could not be opened.", gc: '', src: '' };
+    scanSheet = { status: 'failed', message: "That photo could not be opened.", candidates: [], src: '' };
     render();
   };
   reader.readAsDataURL(file);
 }
 
-function finishScan(gc, seen, src) {
-  const route = scanRoute(gc, state.parts);
-
-  if (route.kind === 'found') {
-    scanSheet = null;
-    query = route.part.number;
-    activeTab = 'find';
-    toast('Read ' + route.part.number);
+function finishScan(pick, seen, src) {
+  if (pick.kind === 'ambiguous') {
+    // Two barcodes on the label that the ranking could not separate. Guessing
+    // here is how a tracking number ends up on the stock list as a part.
+    scanSheet = { status: 'choose', message: '', candidates: pick.candidates, src };
     render();
     return;
   }
 
-  if (route.kind === 'new') {
-    scanSheet = null;
-    openPartSheet('add', null);
-    partSheet.draft.number = route.gc;
-    toast('Read ' + route.gc + ' — not on the van yet');
-    render();
+  if (pick.kind === 'one') {
+    useCandidate(pick.candidate);
     return;
   }
 
@@ -920,7 +927,7 @@ function finishScan(gc, seen, src) {
   const other = seen.filter(Boolean).length;
   scanSheet = {
     status: 'failed',
-    gc: '',
+    candidates: [],
     src,
     message: other
       ? 'Read ' + other + ' barcode' + (other === 1 ? '' : 's') + ' on that label, but none of them was the GC one. It is the barcode at the bottom right, under the returns grid.'
@@ -929,9 +936,66 @@ function finishScan(gc, seen, src) {
   render();
 }
 
+function useCandidate(candidate) {
+  // Whoever the label was picked for, the app has now met their pay ID — so a
+  // second label from the same engineer will not have to be asked about.
+  state.knownIds = rememberStaffId(state.knownIds, candidate.pickedFor);
+  save();
+
+  const route = scanRoute(candidate.gc, state.parts);
+  const own = normaliseNumber(state.settings.staffId);
+  const theirs = own && candidate.pickedFor !== own;
+
+  scanSheet = null;
+
+  if (route.kind === 'found') {
+    query = route.part.number;
+    activeTab = 'find';
+    toast(theirs ? 'Read ' + route.part.number + " — that's another engineer's label" : 'Read ' + route.part.number);
+    render();
+    return;
+  }
+
+  openPartSheet('add', null);
+  partSheet.draft.number = route.gc;
+  toast('Read ' + route.gc + ' — not on the van yet');
+  render();
+}
+
 function buildScanSheet() {
   if (!scanSheet) return '';
   const reading = scanSheet.status === 'reading';
+
+  if (scanSheet.status === 'choose') {
+    const own = normaliseNumber(state.settings.staffId);
+    return `
+      <div class="modal-overlay" data-close-sheet="scan">
+        <div class="modal" data-stop="1">
+          <h3>Which one is the part?</h3>
+          <div class="modal-note">That photo caught more than one barcode and they look alike. Pick the stock code and the app will know the difference next time.</div>
+          <div class="card flush">
+            ${scanSheet.candidates.map((c, i) => {
+              const part = state.parts.find(p => normaliseNumber(p.number) === c.gc);
+              const mine = own && c.pickedFor === own;
+              return `
+                <button class="row" data-pick-candidate="${i}">
+                  <span class="row-main">
+                    <span class="row-title row-num">${esc(c.gc)}</span>
+                    <span class="row-sub">${part ? esc(part.name) : 'Not on the van'}${mine ? ' &middot; picked for you' : ''}</span>
+                  </span>
+                  <span class="row-right"><span class="chevron">&#8250;</span></span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+          <div class="modal-btns">
+            <button class="btn-cancel" data-close-sheet="scan">Neither — type it</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   return `
     <div class="modal-overlay" data-close-sheet="scan">
       <div class="modal" data-stop="1">
@@ -1239,6 +1303,10 @@ function attachListeners() {
     // Cleared so photographing the same label twice still fires a change.
     e.target.value = '';
     if (f) runScan(f);
+  });
+
+  on('[data-pick-candidate]', 'click', e => {
+    useCandidate(scanSheet.candidates[Number(e.currentTarget.dataset.pickCandidate)]);
   });
 
   const staffId = document.getElementById('staff-id');
