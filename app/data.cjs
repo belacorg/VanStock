@@ -64,6 +64,51 @@ function numberMatches(partNumber, typed) {
   return a.startsWith(b) || a.includes(b);
 }
 
+// ── GC codes ────────────────────────────────────────────────────────────────
+//
+// The number an engineer reads off a van part is the GC code on the British
+// Gas dispatch label — printed next to the literal text "GC:", with the part
+// description on the line under it.
+//
+// It is SIX CHARACTERS, not six digits: 612340 and 619900, but also C00090 and
+// J61230. A digit-only assumption locks an engineer out of every part whose
+// code starts with a letter, and on a phone it does so silently by handing
+// them a numeric keypad with no way to type the C.
+const GC_LENGTH = 6;
+const GC_PATTERN = /^[0-9A-Z]{6}$/;
+
+function isGcCode(raw) {
+  return GC_PATTERN.test(normaliseNumber(raw));
+}
+
+// The bottom-right barcode on the label carries the GC code followed by the
+// staff ID of the engineer it was picked for: 612340 + 0000001. Reading it is
+// deterministic where reading print is not — no glare, no crumpled label, no
+// guessing which of the numbers on the label is the one that matters.
+//
+// The catch is that a label carries several barcodes (tracking, tote, S/O) and
+// a camera will find whichever it sees first. `myId` is what settles it: when
+// the engineer has told the app their own staff ID, the GC barcode is the one
+// that ends with it, and nothing else can be mistaken for it.
+function gcFromBarcode(payload, myId) {
+  const clean = normaliseNumber(payload);
+  const id = normaliseNumber(myId);
+
+  if (id && clean.length === GC_LENGTH + id.length && clean.endsWith(id)) {
+    const gc = clean.slice(0, GC_LENGTH);
+    return isGcCode(gc) ? gc : null;
+  }
+
+  // No staff ID set: fall back to the shape of the payload alone. Six
+  // alphanumerics then a seven-digit ID is specific enough that the tracking
+  // and tote barcodes — longer, and all digits — do not collide with it.
+  if (!id && /^[0-9A-Z]{6}[0-9]{7}$/.test(clean)) {
+    return clean.slice(0, GC_LENGTH);
+  }
+
+  return null;
+}
+
 // ── Search ──────────────────────────────────────────────────────────────────
 
 // Ranked, lowest first. The ordering is the whole point: an engineer who typed
@@ -241,11 +286,11 @@ function boxLabel(boxes, boxId) {
 // A van with something in it, for looking at the app before there is any real
 // stock on the list — which is the only way to judge it from an armchair.
 //
-// EVERY PART NUMBER BELOW IS INVENTED. Six digits, because that is what is on
-// the standardised label an engineer actually reads — an internal stock code
-// that is the same shape whoever made the part. A couple of lines carry a
-// manufacturer number in `alt` as well, for the case where the label has come
-// off and the number is read from the part itself.
+// EVERY GC CODE BELOW IS INVENTED, but they are the right shape: six
+// characters, mostly digits, some starting with a letter — the way real ones
+// come. A couple of lines carry a manufacturer number in `alt` as well, for
+// the case where the label has come off and the only number left is the one on
+// the part itself.
 //
 // They are wrong on purpose so nobody fits one.
 //
@@ -276,22 +321,22 @@ function demoVan(today) {
       { id: 'b4', label: 'Door pocket' },
     ],
     parts: [
-      part('p1',  '248733', 'Fan assembly',        'Worcester', 'b1', 2, { usedCount: 3, lastUsedOn: ago(5), notes: 'Greenstar 25i / 30i', alt: ['87161431060'] }),
-      part('p2',  '248741', 'Diverter cartridge',  'Worcester', 'b1', 0, { usedCount: 2, lastUsedOn: ago(23) }),
-      part('p3',  '251190', 'Pressure sensor',     'Worcester', 'b1', 1, { usedCount: 1, lastUsedOn: ago(18) }),
-      part('p4',  '248902', 'Flow turbine',        'Worcester', 'b1', 1),
-      part('p5',  '310465', 'Expansion vessel 8L', 'Vaillant',  'b2', 1, { usedCount: 1, lastUsedOn: ago(2), alt: ['0020098765'] }),
-      part('p6',  '310522', 'Main PCB',            'Vaillant',  'b2', 1, { addedOn: ago(300) }),
-      part('p7',  '310118', 'Auto air vent',       'Vaillant',  'b2', 3, { usedCount: 4, lastUsedOn: ago(1) }),
-      part('p8',  '402317', 'Fan — Logic 24',      'Ideal',     'b1', 0),
-      part('p9',  '415028', 'Diaphragm kit',       'Baxi',      'b1', 2, { usedCount: 1, lastUsedOn: ago(102) }),
-      part('p10', '433960', 'Ignition electrode',  'Glow-worm', 'b1', 2),
-      part('p11', '520744', 'Wireless thermostat', 'Hive',      'b3', 1, { usedCount: 2, lastUsedOn: ago(4) }),
-      part('p12', '536201', '2-port valve head',   'Drayton',   'b3', 1, { addedOn: ago(400) }),
-      part('p13', '536355', '3-port mid-position', 'Honeywell', 'b3', 1, { usedCount: 1, lastUsedOn: ago(10) }),
-      part('p14', '990112', 'Inhibitor 500ml',     'Sundries',  'b4', 4, { usedCount: 9, lastUsedOn: ago(1) }),
-      part('p15', '990147', 'Magnetic filter',     'Sundries',  'b4', 1, { usedCount: 2, lastUsedOn: ago(8) }),
-      part('p16', '990203', '15mm service valve',  'Sundries',  'b4', 6, { usedCount: 5, lastUsedOn: ago(3) }),
+      part('p1',  '612340', 'Powerhead for V4073A valves', 'Honeywell', 'b3', 2, { usedCount: 3, lastUsedOn: ago(5) }),
+      part('p2',  '248741', 'Diverter cartridge',      'Worcester', 'b1', 0, { usedCount: 2, lastUsedOn: ago(23) }),
+      part('p3',  '251190', 'Pressure sensor',         'Worcester', 'b1', 1, { usedCount: 1, lastUsedOn: ago(18), alt: ['87161431060'] }),
+      part('p4',  '248902', 'Flow turbine',            'Worcester', 'b1', 1),
+      part('p5',  '612387', 'Altecnic filling loop',   'Sundries',  'b4', 1, { usedCount: 1, lastUsedOn: ago(2) }),
+      part('p6',  'J61230', 'Heat exchanger',          'Worcester', 'b1', 1, { addedOn: ago(300) }),
+      part('p7',  '310118', 'Auto air vent',           'Vaillant',  'b2', 3, { usedCount: 4, lastUsedOn: ago(1) }),
+      part('p8',  '402317', 'Fan — Logic 24',          'Ideal',     'b1', 0),
+      part('p9',  'C00090', 'Primus gas cap',          'Sundries',  'b4', 2, { usedCount: 1, lastUsedOn: ago(102) }),
+      part('p10', '433960', 'Ignition electrode',      'Glow-worm', 'b1', 2),
+      part('p11', '619900', '(H) Hive Active Plug SLP3', 'Hive',    'b3', 1, { usedCount: 2, lastUsedOn: ago(4) }),
+      part('p12', '536201', '2-port valve head',       'Drayton',   'b3', 1, { addedOn: ago(400) }),
+      part('p13', '310465', 'Expansion vessel 8L',     'Vaillant',  'b2', 1, { usedCount: 1, lastUsedOn: ago(10), alt: ['0020098765'] }),
+      part('p14', '990112', 'Inhibitor 500ml',         'Sundries',  'b4', 4, { usedCount: 9, lastUsedOn: ago(1) }),
+      part('p15', '990147', 'Magnetic filter',         'Sundries',  'b4', 1, { usedCount: 2, lastUsedOn: ago(8) }),
+      part('p16', '990203', '15mm service valve',      'Sundries',  'b4', 6, { usedCount: 5, lastUsedOn: ago(3) }),
     ],
     // p2 and p8 are at zero on the van because these two are out — the counts
     // and the loans have to agree or the demo teaches the wrong thing.
@@ -310,6 +355,10 @@ function demoVan(today) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     MAKES,
+    GC_LENGTH,
+    GC_PATTERN,
+    isGcCode,
+    gcFromBarcode,
     CHASE_AFTER_DAYS,
     STALE_AFTER_DAYS,
     normaliseNumber,

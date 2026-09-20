@@ -209,11 +209,11 @@ function buildFind() {
         <input class="find-input" id="find-input" type="search" inputmode="search"
                autocomplete="off" autocorrect="off" spellcheck="false"
                enterkeyhint="search"
-               placeholder="Part number, or what it is"
+               placeholder="GC number, or what it is"
                value="${esc(query)}">
         ${typed ? '<button class="find-clear" id="find-clear" aria-label="Clear">&times;</button>' : ''}
       </div>
-      ${typed ? '' : '<div class="find-hint">Six digits off the box, or type what it is — &ldquo;worcester fan&rdquo;.</div>'}
+      ${typed ? '' : '<div class="find-hint">The GC number off the label, or type what it is — &ldquo;powerhead valve&rdquo;.</div>'}
     </div>
     ${typed ? buildFindResults(results, typed) : buildFindHome()}
   `;
@@ -592,18 +592,21 @@ function buildPartSheet() {
     <div class="modal-overlay" data-close-sheet="part">
       <div class="modal" data-stop="1">
         <h3>${editing ? 'Edit part' : 'Add a part'}</h3>
-        <div class="modal-note">${editing ? 'Change what the van actually holds.' : 'The number and the box are what the lookup needs. The rest helps you find it when you can’t remember the number.'}</div>
+        <div class="modal-note">${editing ? 'Change what the van actually holds.' : 'The GC number and the box are what the lookup needs. The rest helps you find it when you can’t remember the number.'}</div>
 
         <div class="field">
-          <label class="field-label" for="ps-number">Part number</label>
-          <input class="field-input num" id="ps-number" inputmode="numeric" autocomplete="off"
-                 placeholder="248733" value="${esc(d.number)}">
+          <label class="field-label" for="ps-number">GC number</label>
+          <input class="field-input num" id="ps-number" autocomplete="off"
+                 autocapitalize="characters" autocorrect="off" spellcheck="false"
+                 placeholder="612340" value="${esc(d.number)}">
+          <div class="field-hint">Off the label, next to <b>GC:</b>. Six characters — usually digits, sometimes starting with a letter.</div>
         </div>
 
         <div class="field">
           <label class="field-label" for="ps-name">What is it</label>
           <input class="field-input" id="ps-name" autocomplete="off"
-                 placeholder="Fan assembly" value="${esc(d.name)}">
+                 placeholder="Powerhead for V4073A valves" value="${esc(d.name)}">
+          <div class="field-hint">The <b>Desc:</b> line, straight under the GC number.</div>
         </div>
 
         <div class="field-row">

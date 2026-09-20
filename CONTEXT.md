@@ -11,9 +11,15 @@ Shares its design system with **CTAP Tracker** on purpose (ADR-0005): same token
 **Part**:
 One thing the van carries, identified by its **part number**. Holds what it is, the make, which **box** it lives in, and how many are **on board**.
 
-**Part number**:
-The number printed on the box or the sticker. Usually six digits, but Worcester run eleven and Vaillant ten, and the same number is punctuated three different ways between the sticker, the catalogue and the merchant's invoice — so it is normalised to letters and digits only before anything is compared (ADR-0001).
-_Avoid_: "SKU", "product code"
+**GC number**:
+The code identifying a part on the British Gas dispatch label — printed next to the literal text `GC:`, with the **Desc** line under it. **Six characters, not six digits**: `612340` and `619900`, but also `C00090` and `J61230`. Normalised to letters and digits only, upper-cased, before anything is compared (ADR-0001).
+_Avoid_: "part number" (ambiguous with the manufacturer's own), "SKU", "product code", and above all any assumption that it is numeric
+
+**Manufacturer number**:
+The number moulded into or printed on the part itself — eleven digits for Worcester, ten for Vaillant. Not what the app is organised around, but held against a line in `alt` so a part whose label has come off can still be found.
+
+**Desc**:
+The part description on the dispatch label, straight under the **GC number**. Free text as the warehouse wrote it: "Powerhead for V4073A Valves", "(H) Hive Active Plug SLP3".
 
 **Line**:
 One entry on the stock list. A line is a part number, not a physical item: three inhibitors are one line with three **on board**. One part number is always one line (ADR-0004).

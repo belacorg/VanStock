@@ -40,14 +40,18 @@ describe('the demo van', () => {
     expect(data.loansNeedingChase(later.loans, '2027-03-01', 4)).toHaveLength(1);
   });
 
-  // Six digits is what is printed on the standardised label, whoever made the
-  // part. The first cut of this fixture used manufacturer numbers — eleven
-  // digits for Worcester, ten for Vaillant — which is not what an engineer
-  // reads off the van.
-  it('uses six-digit stock codes, the way the label does', () => {
+  // The GC code off the dispatch label, which is six CHARACTERS — 612340 and
+  // 619900, but also C00090 and J61230. An earlier cut of this fixture was all
+  // digits, which quietly hid the fact that a digits-only assumption locks an
+  // engineer out of every part whose code starts with a letter.
+  it('uses GC codes the shape real ones come in', () => {
     for (const part of van.parts) {
-      expect(part.number, `${part.name} is not a six-digit stock code`).toMatch(/^\d{6}$/);
+      expect(data.isGcCode(part.number), `${part.name}: ${part.number} is not a GC code`).toBe(true);
     }
+  });
+
+  it('includes codes that start with a letter, because real ones do', () => {
+    expect(van.parts.some(p => /^[A-Z]/.test(p.number))).toBe(true);
   });
 
   // The label comes off, and the only number left is the one moulded into the
@@ -55,7 +59,7 @@ describe('the demo van', () => {
   it('finds a part by the manufacturer number when the label has gone', () => {
     const hit = data.searchParts(van.parts, '87161431060');
     expect(hit).toHaveLength(1);
-    expect(hit[0].number).toBe('248733');
+    expect(hit[0].number).toBe('251190');
   });
 
   it('every part sits in a box the demo actually defines', () => {
