@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "node build.mjs",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "deploy": "npm test && node build.mjs && node tools/publish-pages.mjs"
   },
   "devDependencies": {
     "jsdom": "^30.0.1",
