@@ -1,5 +1,10 @@
-const CACHE = 'vanstock-v1';
-const BASE  = '/VanStock';
+const CACHE = 'vanstock-v2';
+
+// Derived from where this worker is served rather than hardcoded, so one file
+// works at a site root, under /VanStock/ on Pages, and inside a preview host.
+// The hardcoded path was silently precaching nothing everywhere but Pages —
+// every addAll entry 404d and the catch swallowed it.
+const BASE = new URL('./', self.location).pathname.replace(/\/$/, '');
 
 // Nothing here is server-side, so a cached copy is a complete working app, not
 // a degraded one. Precaching properly matters more than usual: the moment this

@@ -319,18 +319,25 @@ function buildFindHome() {
         <div class="empty-title">Nothing on the van yet</div>
         <div class="empty-body">Put the van stock in once — number, what it is, which box — and from then on it's six digits and an answer.</div>
         <button class="btn btn-primary" data-add-part="1">Add the first part</button>
+        <div style="margin-top:18px"><button class="btn-link" data-load-demo="1">Or fill it with a demo van to look round</button></div>
       </div>
     `;
   }
 
   const today = todayKey();
   const chase = loansNeedingChase(state.loans, today, state.settings.remindAfter);
+  const demoBanner = state.demo ? `
+    <div class="demo-banner">
+      <b>Demo van.</b> Every part number on this list is invented — they are the right shape for the make and wrong on purpose. Wipe it from Settings before your real stock goes in.
+    </div>
+  ` : '';
   const recent = [...state.parts]
     .filter(p => p.lastUsedOn)
     .sort((a, b) => String(b.lastUsedOn).localeCompare(String(a.lastUsedOn)))
     .slice(0, 5);
 
   return `
+    ${demoBanner}
     ${chase.length ? `
       <div class="section-label">Worth a phone call</div>
       <div class="card flush">
@@ -358,6 +365,7 @@ function buildStock() {
         <div class="empty-title">The list is empty</div>
         <div class="empty-body">Start with one box. Number, what it is, how many — the rest can wait.</div>
         <button class="btn btn-primary" data-add-part="1">Add a part</button>
+        <div style="margin-top:18px"><button class="btn-link" data-load-demo="1">Or fill it with a demo van to look round</button></div>
       </div>
     `;
   }
@@ -951,6 +959,14 @@ function attachListeners() {
   on('[data-add-number]', 'click', e => {
     openPartSheet('add', null);
     partSheet.draft.number = e.currentTarget.dataset.addNumber;
+    render();
+  });
+
+  on('[data-load-demo]', 'click', () => {
+    state = { ...blankState(), ...demoVan(todayKey()) };
+    save();
+    applyTheme();
+    toast('Demo van loaded — the numbers are made up');
     render();
   });
 
