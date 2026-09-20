@@ -40,6 +40,24 @@ describe('the demo van', () => {
     expect(data.loansNeedingChase(later.loans, '2027-03-01', 4)).toHaveLength(1);
   });
 
+  // Six digits is what is printed on the standardised label, whoever made the
+  // part. The first cut of this fixture used manufacturer numbers — eleven
+  // digits for Worcester, ten for Vaillant — which is not what an engineer
+  // reads off the van.
+  it('uses six-digit stock codes, the way the label does', () => {
+    for (const part of van.parts) {
+      expect(part.number, `${part.name} is not a six-digit stock code`).toMatch(/^\d{6}$/);
+    }
+  });
+
+  // The label comes off, and the only number left is the one moulded into the
+  // part. That has to find the line too.
+  it('finds a part by the manufacturer number when the label has gone', () => {
+    const hit = data.searchParts(van.parts, '87161431060');
+    expect(hit).toHaveLength(1);
+    expect(hit[0].number).toBe('248733');
+  });
+
   it('every part sits in a box the demo actually defines', () => {
     const ids = new Set(van.boxes.map(b => b.id));
     for (const p of van.parts) expect(ids.has(p.boxId), `${p.number} is in no box`).toBe(true);

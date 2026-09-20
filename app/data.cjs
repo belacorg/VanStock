@@ -241,9 +241,13 @@ function boxLabel(boxes, boxId) {
 // A van with something in it, for looking at the app before there is any real
 // stock on the list — which is the only way to judge it from an armchair.
 //
-// EVERY PART NUMBER BELOW IS INVENTED. They are the right shape for the make
-// (Worcester eleven digits from 87, Vaillant ten from 00200) so the screens
-// look honest, and they are wrong on purpose so nobody fits one.
+// EVERY PART NUMBER BELOW IS INVENTED. Six digits, because that is what is on
+// the standardised label an engineer actually reads — an internal stock code
+// that is the same shape whoever made the part. A couple of lines carry a
+// manufacturer number in `alt` as well, for the case where the label has come
+// off and the number is read from the part itself.
+//
+// They are wrong on purpose so nobody fits one.
 //
 // Dates are computed from `today` rather than written down: a fixture with
 // fixed dates reads "lent 8 months ago" by the spring, and the whole point of
@@ -272,22 +276,22 @@ function demoVan(today) {
       { id: 'b4', label: 'Door pocket' },
     ],
     parts: [
-      part('p1',  '87161431060', 'Fan assembly',        'Worcester', 'b1', 2, { usedCount: 3, lastUsedOn: ago(5), notes: 'Greenstar 25i / 30i' }),
-      part('p2',  '87161423450', 'Diverter cartridge',  'Worcester', 'b1', 0, { usedCount: 2, lastUsedOn: ago(23) }),
-      part('p3',  '87161567890', 'Pressure sensor',     'Worcester', 'b1', 1, { usedCount: 1, lastUsedOn: ago(18) }),
-      part('p4',  '87161209870', 'Flow turbine',        'Worcester', 'b1', 1),
-      part('p5',  '0020098765', 'Expansion vessel 8L',  'Vaillant',  'b2', 1, { usedCount: 1, lastUsedOn: ago(2) }),
-      part('p6',  '0020123456', 'Main PCB',             'Vaillant',  'b2', 1, { addedOn: ago(300) }),
-      part('p7',  '0020087654', 'Auto air vent',        'Vaillant',  'b2', 3, { usedCount: 4, lastUsedOn: ago(1) }),
-      part('p8',  '175999',     'Fan — Logic 24',       'Ideal',     'b1', 0),
-      part('p9',  '248999',     'Diaphragm kit',        'Baxi',      'b1', 2, { usedCount: 1, lastUsedOn: ago(102) }),
-      part('p10', '2000899999', 'Ignition electrode',   'Glow-worm', 'b1', 2),
-      part('p11', 'DEMO-THERM', 'Wireless thermostat',  'Hive',      'b3', 1, { usedCount: 2, lastUsedOn: ago(4) }),
-      part('p12', '609999',     '2-port valve head',    'Drayton',   'b3', 1, { addedOn: ago(400) }),
-      part('p13', '601999',     '3-port mid-position',  'Honeywell', 'b3', 1, { usedCount: 1, lastUsedOn: ago(10) }),
-      part('p14', '990001',     'Inhibitor 500ml',      'Sundries',  'b4', 4, { usedCount: 9, lastUsedOn: ago(1) }),
-      part('p15', '990002',     'Magnetic filter',      'Sundries',  'b4', 1, { usedCount: 2, lastUsedOn: ago(8) }),
-      part('p16', '990003',     '15mm service valve',   'Sundries',  'b4', 6, { usedCount: 5, lastUsedOn: ago(3) }),
+      part('p1',  '248733', 'Fan assembly',        'Worcester', 'b1', 2, { usedCount: 3, lastUsedOn: ago(5), notes: 'Greenstar 25i / 30i', alt: ['87161431060'] }),
+      part('p2',  '248741', 'Diverter cartridge',  'Worcester', 'b1', 0, { usedCount: 2, lastUsedOn: ago(23) }),
+      part('p3',  '251190', 'Pressure sensor',     'Worcester', 'b1', 1, { usedCount: 1, lastUsedOn: ago(18) }),
+      part('p4',  '248902', 'Flow turbine',        'Worcester', 'b1', 1),
+      part('p5',  '310465', 'Expansion vessel 8L', 'Vaillant',  'b2', 1, { usedCount: 1, lastUsedOn: ago(2), alt: ['0020098765'] }),
+      part('p6',  '310522', 'Main PCB',            'Vaillant',  'b2', 1, { addedOn: ago(300) }),
+      part('p7',  '310118', 'Auto air vent',       'Vaillant',  'b2', 3, { usedCount: 4, lastUsedOn: ago(1) }),
+      part('p8',  '402317', 'Fan — Logic 24',      'Ideal',     'b1', 0),
+      part('p9',  '415028', 'Diaphragm kit',       'Baxi',      'b1', 2, { usedCount: 1, lastUsedOn: ago(102) }),
+      part('p10', '433960', 'Ignition electrode',  'Glow-worm', 'b1', 2),
+      part('p11', '520744', 'Wireless thermostat', 'Hive',      'b3', 1, { usedCount: 2, lastUsedOn: ago(4) }),
+      part('p12', '536201', '2-port valve head',   'Drayton',   'b3', 1, { addedOn: ago(400) }),
+      part('p13', '536355', '3-port mid-position', 'Honeywell', 'b3', 1, { usedCount: 1, lastUsedOn: ago(10) }),
+      part('p14', '990112', 'Inhibitor 500ml',     'Sundries',  'b4', 4, { usedCount: 9, lastUsedOn: ago(1) }),
+      part('p15', '990147', 'Magnetic filter',     'Sundries',  'b4', 1, { usedCount: 2, lastUsedOn: ago(8) }),
+      part('p16', '990203', '15mm service valve',  'Sundries',  'b4', 6, { usedCount: 5, lastUsedOn: ago(3) }),
     ],
     // p2 and p8 are at zero on the van because these two are out — the counts
     // and the loans have to agree or the demo teaches the wrong thing.
