@@ -17,7 +17,7 @@ const OUT = 'dist';
 const SHIP = [
   'index.html',
   'app.js',
-  'data.cjs',
+  'data.js',
   'style.css',
   'fonts.css',
   'fonts',

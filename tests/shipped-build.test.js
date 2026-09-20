@@ -28,6 +28,18 @@ describe('what actually ships', () => {
     }
   });
 
+  // GitHub Pages serves a .cjs file as application/node, which every browser
+  // refuses to execute. The deployed app came up blank because of it, with
+  // nothing in the console worth reading. Nothing the page loads may carry an
+  // extension the static host will not serve as script.
+  it('loads no script the host will refuse to run', () => {
+    const scripts = [...index.matchAll(/<script src="([^"?]+)/g)].map(m => m[1]);
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const src of scripts) {
+      expect(src, `${src} must end .js to be served as JavaScript`).toMatch(/\.js$/);
+    }
+  });
+
   // Every asset carries the same ?v=, bumped by hand on deploy. One left behind
   // is a phone running yesterday's stylesheet against today's markup.
   it('cache-busts every asset with the same version', () => {

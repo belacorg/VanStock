@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { createRequire } from 'node:module';
+import { loadData } from './helpers/load-data.js';
 import { bootApp } from './helpers/app-harness.js';
 
-const require = createRequire(import.meta.url);
-const data = require('../app/data.cjs');
+const data = loadData();
 
 const TODAY = '2026-09-20';
 

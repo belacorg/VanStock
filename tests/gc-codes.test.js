@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { createRequire } from 'node:module';
+import { loadData } from './helpers/load-data.js';
 import { bootApp, seedState } from './helpers/app-harness.js';
 
-const require = createRequire(import.meta.url);
-const data = require('../app/data.cjs');
+const data = loadData();
 
 // Read off real British Gas dispatch labels. Three are all digits and two
 // start with a letter, which is the whole point of this file.

@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { loadData } from './helpers/load-data.js';
 import { bootApp, seedState } from './helpers/app-harness.js';
 
-const require = createRequire(import.meta.url);
-const data = require('../app/data.cjs');
+const data = loadData();
 
 const STOCK = [
   { id: 'p1', number: '612340', name: 'Powerhead for V4073A valves' },
@@ -74,8 +74,8 @@ describe('the staff ID', () => {
 
 describe('the reader ships with the app', () => {
   it('is in the build allowlist and the offline precache', () => {
-    const build = require('node:fs').readFileSync('build.mjs', 'utf8');
-    const sw = require('node:fs').readFileSync('app/sw.js', 'utf8');
+    const build = readFileSync('build.mjs', 'utf8');
+    const sw = readFileSync('app/sw.js', 'utf8');
     expect(build).toContain("'vendor'");
     expect(sw).toContain('/vendor/zxing.min.js');
   });
@@ -83,7 +83,7 @@ describe('the reader ships with the app', () => {
   // Local-only means local-only (ADR-0006). A reader pulled from a CDN at the
   // moment of use is a third-party request and a dependency on signal.
   it('is served from this origin, not a CDN', () => {
-    const app = require('node:fs').readFileSync('app/app.js', 'utf8');
+    const app = readFileSync('app/app.js', 'utf8');
     expect(app).toContain("ZXING_SRC = 'vendor/zxing.min.js'");
     expect(app).not.toMatch(/https?:\/\/cdn/);
   });
@@ -95,7 +95,7 @@ describe('the reader ships with the app', () => {
   // engine — this test is what will notice if a future version brings them
   // back, rather than a publish failing with no obvious cause.
   it('carries no raw control bytes', () => {
-    const buf = require('node:fs').readFileSync('app/vendor/zxing.min.js');
+    const buf = readFileSync('app/vendor/zxing.min.js');
     const bad = [...buf].filter(b => (b < 0x20 && b !== 0x09 && b !== 0x0a && b !== 0x0d) || b === 0x7f);
     expect(bad).toEqual([]);
   });

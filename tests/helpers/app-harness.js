@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'app');
-const dataSrc = readFileSync(join(APP, 'data.cjs'), 'utf8');
+const dataSrc = readFileSync(join(APP, 'data.js'), 'utf8');
 const appSrc = readFileSync(join(APP, 'app.js'), 'utf8');
 
 function runScript(window, src) {

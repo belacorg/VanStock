@@ -1,23 +1,12 @@
 import { defineConfig } from 'vite';
 
-// data.cjs is loaded by the browser as a classic <script> — it is the pure
-// lookup layer, shared byte-for-byte with the Node test runs. Vite serves .cjs
-// as application/node, which browsers refuse. This plugin corrects the type.
-const serveCjsAsJs = {
-  name: 'serve-cjs-as-js',
-  configureServer(server) {
-    server.middlewares.use((req, res, next) => {
-      if (req.url && req.url.split('?')[0].endsWith('.cjs')) {
-        res.setHeader('Content-Type', 'application/javascript');
-      }
-      next();
-    });
-  },
-};
-
+// No plugins. There used to be one here rewriting the Content-Type of the
+// lookup layer, which was named data.cjs so Node could require() it past this
+// package's "type": "module" — and which Vite, and GitHub Pages after it,
+// served as application/node for browsers to refuse. The file is data.js now
+// and the tests read it directly, so dev and production both just serve it.
 export default defineConfig(({ command }) => ({
   base: command === 'build' ? '/VanStock/' : '/',
   root: './app',
-  plugins: [serveCjsAsJs],
   server: { port: 3838, host: true },
 }));

@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { createRequire } from 'node:module';
+import { loadData } from './helpers/load-data.js';
 
-const require = createRequire(import.meta.url);
-const data = require('../app/data.cjs');
+const data = loadData();
 
 const part = (over = {}) => ({
   id: 'p', number: '248733', name: 'Fan assembly', make: 'Worcester',

@@ -16,4 +16,6 @@ The list is an allowlist rather than a denylist so that nothing reaches the depl
 ## Consequences
 What is tested is what ships.
 
+Serving files verbatim also means the static host's opinion about a file extension is the app's problem. GitHub Pages serves `.cjs` as `application/node`, which browsers refuse to execute — the first deploy came up blank because the lookup layer was named `data.cjs` so Node could `require()` it past this package's `"type": "module"`. It is `data.js` now and the tests read it directly instead. `tests/shipped-build.test.js` fails on any script the page loads that does not end `.js`.
+
 A new file that needs to ship has to be added to `SHIP` by hand, and forgetting is the obvious failure mode — so `tests/shipped-build.test.js` fails when `index.html` references a file the build does not ship, the service worker does not precache, or when the `?v=` numbers drift apart.
