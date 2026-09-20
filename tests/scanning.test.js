@@ -87,4 +87,16 @@ describe('the reader ships with the app', () => {
     expect(app).toContain("ZXING_SRC = 'vendor/zxing.min.js'");
     expect(app).not.toMatch(/https?:\/\/cdn/);
   });
+
+  // The library ships with raw control bytes inside its Aztec character table.
+  // They are legal JavaScript and they parse fine, but they travel badly: the
+  // artifact host refuses a text file carrying an ESC outright. They are
+  // rewritten to \xNN escapes on the way in, which is the same value to the
+  // engine — this test is what will notice if a future version brings them
+  // back, rather than a publish failing with no obvious cause.
+  it('carries no raw control bytes', () => {
+    const buf = require('node:fs').readFileSync('app/vendor/zxing.min.js');
+    const bad = [...buf].filter(b => (b < 0x20 && b !== 0x09 && b !== 0x0a && b !== 0x0d) || b === 0x7f);
+    expect(bad).toEqual([]);
+  });
 });
