@@ -16,7 +16,7 @@ self.addEventListener('install', e => {
       BASE + '/',
       BASE + '/index.html',
       BASE + '/app.js',
-      BASE + '/data.cjs',
+      BASE + '/data.js',
       BASE + '/style.css',
       BASE + '/fonts.css',
       BASE + '/fonts/DMSans-latin.woff2',
