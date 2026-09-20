@@ -82,31 +82,73 @@ function isGcCode(raw) {
 }
 
 // The bottom-right barcode on the label carries the GC code followed by the
-// staff ID of the engineer it was picked for: 612340 + 0000001. Reading it is
-// deterministic where reading print is not — no glare, no crumpled label, no
-// guessing which of the numbers on the label is the one that matters.
+// seven-digit staff ID of the engineer the part was picked FOR — 612340 +
+// 0000001. Reading it is exact where reading print is a guess.
 //
-// The catch is that a label carries several barcodes (tracking, tote, S/O) and
-// a camera will find whichever it sees first. `myId` is what settles it: when
-// the engineer has told the app their own staff ID, the GC barcode is the one
-// that ends with it, and nothing else can be mistaken for it.
-function gcFromBarcode(payload, myId) {
+// That trailing ID is NOT necessarily this engineer's. A part lent by another
+// engineer arrives on their label, with their pay ID on it, and refusing those
+// would refuse exactly the parts the lending half of this app exists for.
+//
+// But the shape alone is not enough either: a ByBox tracking number can be
+// thirteen digits too, and then "six characters of code, seven of ID" fits it
+// perfectly and yields a stock code that never existed. So candidates are
+// ranked rather than filtered, and where the ranking cannot separate them the
+// engineer is asked — and the answer is remembered, so the next label from the
+// same engineer is unambiguous.
+const GC_BARCODE = /^[0-9A-Z]{6}[0-9]{7}$/;
+
+function gcCandidate(payload) {
   const clean = normaliseNumber(payload);
-  const id = normaliseNumber(myId);
+  if (!GC_BARCODE.test(clean)) return null;
+  return { gc: clean.slice(0, GC_LENGTH), pickedFor: clean.slice(GC_LENGTH), payload: clean };
+}
 
-  if (id && clean.length === GC_LENGTH + id.length && clean.endsWith(id)) {
-    const gc = clean.slice(0, GC_LENGTH);
-    return isGcCode(gc) ? gc : null;
+// Every staff ID the app has met scores highest, because a tracking number's
+// last seven digits will not be one. A GC already on the van scores next: the
+// engineer is usually looking at a part they carry. Leading zero is the weakest
+// signal and is only ever a tie-breaker — it is a pattern observed across the
+// pay IDs seen so far, not a rule anybody published.
+function rankGcCandidates(payloads, opts) {
+  const o = opts || {};
+  const ids = new Set((o.knownIds || []).map(normaliseNumber).filter(Boolean));
+  const stock = new Set((o.parts || []).map(p => normaliseNumber(p.number)));
+  const seen = new Set();
+
+  return (payloads || [])
+    .map(gcCandidate)
+    .filter(Boolean)
+    .filter(c => (seen.has(c.payload) ? false : seen.add(c.payload)))
+    .map(c => {
+      let score = 0;
+      if (ids.has(c.pickedFor)) score += 4;
+      if (stock.has(c.gc)) score += 2;
+      if (c.pickedFor.charAt(0) === '0') score += 1;
+      return Object.assign({ score }, c);
+    })
+    .sort((a, b) => b.score - a.score || a.payload.localeCompare(b.payload));
+}
+
+// One candidate, or a clear winner, is an answer. Two that the ranking cannot
+// separate is a question — and guessing there would put a tracking number on
+// the stock list as though it were a part.
+function pickGcCandidate(payloads, opts) {
+  const ranked = rankGcCandidates(payloads, opts);
+  if (!ranked.length) return { kind: 'none', candidates: [] };
+  if (ranked.length === 1 || ranked[0].score > ranked[1].score) {
+    return { kind: 'one', candidate: ranked[0], candidates: ranked };
   }
+  return { kind: 'ambiguous', candidates: ranked };
+}
 
-  // No staff ID set: fall back to the shape of the payload alone. Six
-  // alphanumerics then a seven-digit ID is specific enough that the tracking
-  // and tote barcodes — longer, and all digits — do not collide with it.
-  if (!id && /^[0-9A-Z]{6}[0-9]{7}$/.test(clean)) {
-    return clean.slice(0, GC_LENGTH);
-  }
+// Every ID confirmed by a scan the engineer accepted, newest first. This is how
+// the app comes to know the pay IDs of the engineers it borrows from: it is
+// told once, by a scan going through, and never has to ask about them again.
+const MAX_KNOWN_IDS = 40;
 
-  return null;
+function rememberStaffId(known, id) {
+  const clean = normaliseNumber(id);
+  if (!clean) return known || [];
+  return [clean].concat((known || []).filter(k => k !== clean)).slice(0, MAX_KNOWN_IDS);
 }
 
 // What to do with a code once it has been read off a label. Kept here, away
@@ -367,7 +409,12 @@ if (typeof module !== 'undefined' && module.exports) {
     GC_LENGTH,
     GC_PATTERN,
     isGcCode,
-    gcFromBarcode,
+    gcCandidate,
+    rankGcCandidates,
+    pickGcCandidate,
+    rememberStaffId,
+    GC_BARCODE,
+    MAX_KNOWN_IDS,
     scanRoute,
     CHASE_AFTER_DAYS,
     STALE_AFTER_DAYS,
