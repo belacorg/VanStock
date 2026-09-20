@@ -1,0 +1,605 @@
+/* Van Stock shares CTAP Tracker's design system deliberately: same tokens, same
+   typeface, same spacing, same iOS-dark surfaces. They are two tools used by
+   the same engineer on the same phone in the same working day, and switching
+   between them should feel like changing tab, not changing app. */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+button, input, select, textarea { font-family: inherit; }
+
+:root {
+  /* ── iOS Dark palette ── */
+  --vs-bg:        #000000;
+  --vs-surface:   #1c1c1e;
+  --vs-surface-2: #2c2c2e;
+  --vs-surface-3: #3a3a3c;
+  --vs-hair:      #48484a;
+  --vs-hair-2:    #636366;
+
+  --vs-ink:   #f2f2f7;
+  --vs-ink-2: #8e8e93;
+  --vs-ink-3: #636366;
+
+  --vs-accent:      #4a86d8;
+  --vs-accent-ink:  #ffffff;
+  --vs-accent-dim:  rgba(74,134,216,.15);
+  --tile-border:    rgba(74,134,216,0.11);
+
+  --vs-green: #5fd28a;
+  --vs-amber: #ffc857;
+  --vs-red:   #ff7060;
+
+  /* One typeface. Figures use DM Sans with tabular-nums — part numbers are
+     columns of digits and they have to line up, but a second monospace face
+     beside DM Sans reads as a mistake. */
+  --vs-font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+
+  --vs-r-sm: 10px;
+  --vs-r-md: 14px;
+  --vs-r-lg: 18px;
+  --vs-r-xl: 24px;
+
+  --bg:        var(--vs-bg);
+  --surface:   var(--vs-surface);
+  --surface2:  var(--vs-surface-2);
+  --surface3:  var(--vs-surface-3);
+  --sep:       var(--vs-hair);
+  --border:    var(--vs-hair);
+  --text:      var(--vs-ink);
+  --fg:        var(--vs-ink);
+  --muted:     var(--vs-ink-2);
+  --muted2:    var(--vs-ink-3);
+  --accent:    var(--vs-accent);
+  --green:     var(--vs-green);
+  --amber:     var(--vs-amber);
+  --red:       var(--vs-red);
+  --radius:    var(--vs-r-md);
+  --radius-sm: var(--vs-r-sm);
+}
+
+/* ── Light mode ── */
+body.light {
+  --vs-bg:        #f2f2f7;
+  --vs-surface:   #ffffff;
+  --vs-surface-2: #f2f2f7;
+  --vs-surface-3: #e5e5ea;
+  --vs-hair:      #c7c7cc;
+  --vs-hair-2:    #aeaeb2;
+  --vs-ink:       #000000;
+  --vs-ink-2:     #3c3c43;
+  --vs-ink-3:     #6c6c70;
+  --bg:       #f2f2f7;
+  --surface:  #ffffff;
+  --surface2: #f2f2f7;
+  --surface3: #e5e5ea;
+  --sep:      rgba(0,0,0,0.12);
+  --border:   rgba(0,0,0,0.12);
+  --text:     #000000;
+  --fg:       #000000;
+  --muted:    #3c3c43;
+  --muted2:   #6c6c70;
+  --tile-border: rgba(74,134,216,0.18);
+  background: #f2f2f7;
+  color: #000000;
+}
+body.light .top-bar {
+  background: rgba(242,242,247,0.92);
+  border-bottom-color: rgba(0,0,0,0.1);
+}
+body.light .bottom-nav {
+  background: rgba(255,255,255,0.95);
+  border-top-color: rgba(0,0,0,0.1);
+}
+body.light .modal-overlay { background: rgba(0,0,0,0.4); }
+body.light .modal { background: #ffffff; border-color: rgba(0,0,0,0.08); }
+body.light .find-input { background: #ffffff; border-color: #c7c7cc; }
+body.light .field-input, body.light select.field-input { background: #f2f2f7; color: #000; border: 1px solid #c7c7cc; }
+
+html { font-size: 16px; }
+body {
+  font-family: var(--vs-font-sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100dvh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  touch-action: manipulation;
+}
+
+/* ── Layout ── */
+#app { display: flex; flex-direction: column; min-height: 100dvh; }
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px;
+  background: rgba(0, 0, 0, 0.85);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 0.5px solid var(--sep);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  gap: 12px;
+  transform: translateZ(0);
+}
+.top-left { display: flex; align-items: center; gap: 10px; }
+.top-title { display: flex; flex-direction: column; align-items: flex-start; }
+.top-title-main { font-size: 0.8125rem; font-weight: 700; line-height: 1; letter-spacing: -0.5px; }
+.top-title-sub  { font-size: 0.58rem; color: var(--muted); letter-spacing: 0.02em; margin-top: 2px; }
+
+/* The mark is a parts box with a tick in it — the answer the app exists to
+   give. Coloured from the tokens, never from the markup, so light mode gets a
+   dark tick without a second rule. */
+.brand-mark { flex-shrink: 0; display: block; }
+.brand-mark-box  { stroke: var(--accent); }
+.brand-mark-tick { stroke: var(--text); }
+
+.top-count { font-size: 0.66rem; color: var(--muted); font-weight: 600; text-align: right; line-height: 1.3; }
+.top-count b { color: var(--text); font-weight: 700; }
+
+.main { flex: 1; padding: 12px 16px 100px; max-width: 600px; margin: 0 auto; width: 100%; }
+
+/* ── Bottom nav ── */
+.bottom-nav {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  display: flex;
+  background: var(--vs-surface);
+  border-top: 1px solid rgba(255,255,255,0.09);
+  border-radius: 22px 22px 0 0;
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+  gap: 4px;
+  z-index: 50;
+}
+.bottom-nav button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.62rem;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  border-radius: 20px;
+  transition: color 0.15s, background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
+}
+.bottom-nav button.active { color: var(--vs-accent-ink); background: var(--accent); }
+.bottom-nav button svg { width: 22px; height: 22px; }
+.nav-dot {
+  position: absolute;
+  top: 6px; right: calc(50% - 18px);
+  width: 8px; height: 8px;
+  border-radius: 99px;
+  background: var(--amber);
+  border: 1.5px solid var(--vs-surface);
+}
+.bottom-nav button.active .nav-dot { border-color: var(--accent); }
+
+/* ── Cards ── */
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--tile-border);
+  padding: 16px;
+  margin-bottom: 10px;
+}
+.card.flush { padding: 0; overflow: hidden; }
+.card h2 {
+  font-size: 0.67rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.section-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--muted2);
+  margin: 18px 0 6px 2px;
+}
+.section-label:first-child { margin-top: 2px; }
+
+/* ── Find ── */
+.find-wrap { margin-bottom: 12px; }
+.find-input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--tile-border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 16px 44px 16px 16px;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.find-input::placeholder { color: var(--muted2); font-weight: 500; letter-spacing: 0; font-size: 1rem; }
+/* type="search" for the phone keyboard's Search key, but WebKit's own clear
+   button comes with it — two crosses in one field, and the native one is a
+   6px target in a moving van. Hide it and keep ours. */
+.find-input::-webkit-search-cancel-button,
+.find-input::-webkit-search-decoration { -webkit-appearance: none; appearance: none; display: none; }
+.find-input:focus { border-color: var(--accent); }
+.find-field { position: relative; }
+.find-clear {
+  position: absolute;
+  right: 8px; top: 50%;
+  transform: translateY(-50%);
+  width: 30px; height: 30px;
+  border-radius: 99px;
+  border: none;
+  background: var(--surface3);
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.find-hint { font-size: 0.7rem; color: var(--muted); margin: 8px 2px 0; line-height: 1.5; }
+
+/* The answer. Colour carries it before any word is read: green you have it,
+   amber somebody else has it, red there is none. */
+.answer {
+  border-radius: var(--radius);
+  border: 1px solid var(--tile-border);
+  background: var(--surface);
+  padding: 16px;
+  margin-bottom: 10px;
+  border-left: 4px solid var(--muted2);
+}
+.answer.on-van   { border-left-color: var(--green); }
+.answer.lent-out { border-left-color: var(--amber); }
+.answer.none     { border-left-color: var(--red); }
+.answer-verdict {
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: -0.6px;
+  line-height: 1.1;
+  margin-bottom: 2px;
+}
+.answer.on-van   .answer-verdict { color: var(--green); }
+.answer.lent-out .answer-verdict { color: var(--amber); }
+.answer.none     .answer-verdict { color: var(--red); }
+.answer-where {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.answer-part { font-size: 0.86rem; color: var(--muted); margin-top: 6px; line-height: 1.45; }
+.answer-part b { color: var(--text); font-weight: 600; }
+.answer-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+
+.box-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--vs-accent-dim);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.82rem;
+  padding: 5px 12px;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+.box-chip.plain { background: var(--surface2); color: var(--muted); font-weight: 600; font-size: 0.72rem; padding: 3px 9px; }
+
+.qty-chip {
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface2);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 0.78rem;
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.status-badge.green   { background: rgba(95, 210, 138, 0.15); color: var(--green); }
+.status-badge.amber   { background: rgba(255, 200, 87, 0.15); color: var(--amber); }
+.status-badge.red     { background: rgba(255, 112, 96, 0.15); color: var(--red); }
+.status-badge.neutral { background: rgba(127, 127, 127, 0.15); color: var(--muted); }
+
+/* ── Buttons ── */
+.btn {
+  padding: 11px 16px;
+  border-radius: 11px;
+  border: none;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  font-family: inherit;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-quiet   { background: var(--surface2); color: var(--text); }
+.btn-danger  { background: rgba(255,112,96,0.15); color: var(--red); }
+.btn-block   { width: 100%; }
+.btn:active  { opacity: 0.75; }
+/* "Ring Dave" is an <a href="tel:"> so the phone actually dials it, but it has
+   to sit in the row looking like every other button, not like a link. */
+a.btn { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+.btn-link {
+  background: none; border: none; color: var(--accent);
+  font-size: 0.84rem; font-weight: 600; cursor: pointer; padding: 0;
+}
+
+/* ── Rows ── */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  gap: 12px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.row:active { background: var(--surface2); }
+.row + .row { border-top: 0.5px solid var(--sep); }
+.row-main { min-width: 0; flex: 1; }
+.row-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-sub { font-size: 0.72rem; color: var(--muted); margin-top: 3px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.row-num { font-variant-numeric: tabular-nums; letter-spacing: 0.04em; font-weight: 700; color: var(--text); }
+.row-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.chevron { color: var(--muted2); font-size: 1rem; flex-shrink: 0; transition: transform 0.2s; }
+.chevron.open { transform: rotate(90deg); }
+
+/* ── Make groups ── */
+.group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.group-head + .group-body { border-top: 0.5px solid var(--sep); }
+.group-name { font-size: 0.86rem; font-weight: 700; letter-spacing: -0.2px; }
+.group-count { font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.group-body { display: none; background: var(--surface2); }
+.group.open .group-body { display: block; }
+.group + .group { border-top: 0.5px solid var(--sep); }
+.group.open .group-head { background: var(--surface2); }
+
+.demo-banner {
+  background: rgba(255, 200, 87, 0.12);
+  border: 1px solid rgba(255, 200, 87, 0.3);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+.demo-banner b { color: var(--amber); }
+
+/* ── Empty states ── */
+.empty {
+  text-align: center;
+  padding: 36px 20px;
+  color: var(--muted);
+}
+.empty-title { font-size: 0.95rem; font-weight: 700; color: var(--text); margin-bottom: 6px; letter-spacing: -0.2px; }
+.empty-body { font-size: 0.8rem; line-height: 1.6; max-width: 300px; margin: 0 auto 16px; }
+
+/* ── Sheets / modals ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 200;
+}
+.modal-overlay.hidden { display: none; }
+.modal {
+  background: var(--surface);
+  border-radius: 20px 20px 0 0;
+  padding: 8px 20px calc(28px + env(safe-area-inset-bottom, 0px));
+  width: 100%;
+  max-width: 500px;
+  max-height: 92dvh;
+  overflow-y: auto;
+  animation: slideUp 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.modal::before {
+  content: '';
+  display: block;
+  width: 36px; height: 5px;
+  background: var(--surface3);
+  border-radius: 99px;
+  margin: 0 auto 18px;
+}
+@keyframes slideUp {
+  from { transform: translateY(50px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.modal h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.3px; }
+.modal-note { font-size: 0.8rem; color: var(--muted); margin-bottom: 16px; line-height: 1.5; }
+.modal-btns { display: flex; gap: 10px; margin-top: 18px; }
+/* A <label for> is a button here too — it is how a file input gets a styled
+   trigger — so it has to size like one or it spills out of the row. */
+.modal-btns button,
+.modal-btns label { flex: 1; padding: 14px; border-radius: 12px; border: none; font-size: 1rem; font-weight: 700; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; text-align: center; }
+.btn-cancel  { background: var(--surface2); color: var(--muted); }
+.btn-confirm { background: var(--accent); color: #fff; }
+
+/* ── Form fields ── */
+.field { margin-bottom: 12px; }
+.field-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+  display: block;
+}
+.field-input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid transparent;
+  color: var(--text);
+  border-radius: 10px;
+  padding: 13px 14px;
+  font-size: 16px;      /* anything smaller and iOS zooms the page on focus */
+  font-weight: 600;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.field-input:focus { border-color: var(--accent); }
+.field-input::placeholder { color: var(--muted2); font-weight: 400; }
+.field-input.num { font-variant-numeric: tabular-nums; letter-spacing: 0.06em; }
+select.field-input {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%238e8e93' stroke-width='1.8' stroke-linecap='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 11px;
+  padding-right: 36px;
+}
+.field-row { display: flex; gap: 10px; }
+.field-row .field { flex: 1; }
+.field-hint { font-size: 0.7rem; color: var(--muted); margin-top: 6px; line-height: 1.45; }
+
+.stepper { display: flex; align-items: center; gap: 10px; }
+.stepper button {
+  width: 42px; height: 42px;
+  border-radius: 11px;
+  border: 1px solid var(--sep);
+  background: var(--surface2);
+  color: var(--accent);
+  font-size: 1.3rem;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.stepper button:active { background: var(--surface3); }
+.stepper .stepper-val {
+  flex: 1;
+  text-align: center;
+  font-size: 1.3rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Loans ── */
+.loan-row { padding: 12px 14px; }
+.loan-row + .loan-row { border-top: 0.5px solid var(--sep); }
+.loan-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.loan-who { font-size: 0.92rem; font-weight: 700; letter-spacing: -0.2px; }
+.loan-what { font-size: 0.76rem; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+.loan-actions { display: flex; gap: 8px; margin-top: 10px; }
+.loan-actions .btn { padding: 8px 14px; font-size: 0.8rem; }
+
+/* ── Scanning ── */
+.scan-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 10px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.scan-btn svg { width: 19px; height: 19px; flex-shrink: 0; }
+.scan-btn:active { opacity: 0.75; }
+
+.scan-working { display: flex; justify-content: center; padding: 28px 0 18px; }
+.scan-spinner {
+  width: 30px; height: 30px;
+  border-radius: 99px;
+  border: 3px solid var(--surface3);
+  border-top-color: var(--accent);
+  animation: scan-spin 0.8s linear infinite;
+}
+@keyframes scan-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .scan-spinner { animation-duration: 2.4s; }
+}
+
+/* The photo comes back with the failure so the engineer can see what the app
+   was looking at — usually the whole box, when it wanted the barcode. */
+.scan-shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 34vh;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--sep);
+  margin-bottom: 4px;
+}
+
+/* ── Toast ── */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%) translateY(12px);
+  background: var(--surface3);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 10px 18px;
+  border-radius: 99px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 300;
+  max-width: 88vw;
+  text-align: center;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+.footer-note {
+  font-size: 0.7rem;
+  color: var(--muted2);
+  text-align: center;
+  line-height: 1.6;
+  margin: 20px 0 4px;
+}
