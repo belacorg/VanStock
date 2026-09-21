@@ -79,7 +79,7 @@ export function bootApp({ now = '2026-09-20T09:00:00', storage = null } = {}) {
 // phone already holds it.
 export function seedState(over = {}) {
   return JSON.stringify({
-    version: 1,
+    version: 2,
     boxes: [
       { id: 'b1', label: 'Box 1' },
       { id: 'b2', label: 'Box 2' },

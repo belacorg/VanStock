@@ -1,4 +1,4 @@
-const CACHE = 'vanstock-v3';
+const CACHE = 'vanstock-v4';
 
 // Derived from where this worker is served rather than hardcoded, so one file
 // works at a site root, under /VanStock/ on Pages, and inside a preview host.
@@ -35,7 +35,11 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      // Only this app's old caches. CTAP Tracker is served from the same
+      // address, so the cache list holds its caches too — and deleting every
+      // key that was not this one knocked it off offline mode each time Van
+      // Stock updated.
+      .then(keys => Promise.all(keys.filter(k => k.startsWith('vanstock-') && k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });

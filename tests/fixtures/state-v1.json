@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "boxes": [{ "id": "b1", "label": "Box 1" }, { "id": "b2", "label": "Door pocket" }],
+  "parts": [
+    { "id": "p1", "number": "612340", "name": "Powerhead for V4073A valves", "make": "Honeywell", "boxId": "b1", "qty": 2, "alt": [], "addedOn": "2026-09-20", "usedCount": 3, "lastUsedOn": "2026-09-20", "dateCode": "", "notes": "" },
+    { "id": "p2", "number": "C00090", "name": "Primus gas cap", "make": "Sundries", "boxId": "b2", "qty": 0, "alt": [], "addedOn": "2026-09-20", "usedCount": 1, "lastUsedOn": null, "dateCode": "03/24", "notes": "keep two" }
+  ],
+  "loans": [{ "id": "l1", "partId": "p2", "qty": 1, "to": "Dave", "on": "2026-09-19", "returnedOn": null }],
+  "engineers": [{ "name": "Dave", "phone": "07700900111" }],
+  "knownIds": ["0000001", "0000003"],
+  "settings": { "remindAfter": 5, "theme": "light", "staffId": "0000002" }
+}

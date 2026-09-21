@@ -12,7 +12,9 @@ describe('nothing off a label is kept but the code and the description', () => {
   // engineers' pay numbers — plus the engineer's own. Ignoring them is not
   // enough; they have to be gone from the phone.
   it('deletes stored staff IDs from a phone that has them', () => {
+    // As the old builds wrote it: version 1, with the IDs.
     const old = JSON.parse(seedState());
+    old.version = 1;
     old.knownIds = ['0000001', '0000003'];
     old.settings.staffId = '0000002';
     const app = bootApp({ storage: { vs_state: JSON.stringify(old) } });
@@ -25,6 +27,7 @@ describe('nothing off a label is kept but the code and the description', () => {
 
   it('leaves the rest of the van alone while it does', () => {
     const old = JSON.parse(seedState());
+    old.version = 1;
     old.knownIds = ['0000001'];
     const app = bootApp({ storage: { vs_state: JSON.stringify(old) } });
     expect(app.state().parts).toHaveLength(3);
