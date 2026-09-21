@@ -3,4 +3,3 @@ dist/
 .DS_Store
 app/.vite/
 .gh-pages/
-.private/
