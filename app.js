@@ -229,10 +229,10 @@ function buildFind() {
                value="${esc(query)}">
         ${typed ? '<button class="find-clear" id="find-clear" aria-label="Clear">&times;</button>' : ''}
       </div>
-      <label class="btn btn-quiet btn-block scan-btn" for="scan-file">
+      <button class="btn btn-quiet btn-block scan-btn" data-live-scan="1">
         ${ICON_CAMERA}<span>Scan the label</span>
-      </label>
-      ${typed ? '' : '<div class="find-hint">Type the GC number, or what it is — &ldquo;powerhead valve&rdquo;. To scan, get the <b>top of the label</b> — the GC number and the description — filling the screen, and hold it straight.</div>'}
+      </button>
+      ${typed ? '' : '<div class="find-hint">Type the GC number, or what it is — &ldquo;powerhead valve&rdquo;. To scan, point the camera at the <b>top of the label</b> — the GC number and the description. It registers on its own.</div>'}
     </div>
     ${typed ? buildFindResults(results, typed) : buildFindHome()}
   `;
@@ -837,20 +837,197 @@ function imageToCanvas(img, width, deg) {
 // holds it straight. A tilt is tried only when straight found nothing — each
 // pass is a second or two on a phone, and a scan that takes fifteen seconds is
 // one nobody uses twice.
-const OCR_ATTEMPTS = [0, -8, 8];
+const OCR_ATTEMPTS = [[0, '6'], [0, '11'], [-8, '6'], [8, '6']];
 
 async function readPrint(img, onStage) {
   const worker = await loadOcr(m => {
     if (/loading|initializ/i.test(m.status) && onStage) onStage('loading');
   });
   if (onStage) onStage('reading');
-  await worker.setParameters({ tessedit_pageseg_mode: '6' });
-  for (const deg of OCR_ATTEMPTS) {
+  for (const [deg, mode] of OCR_ATTEMPTS) {
+    await worker.setParameters({ tessedit_pageseg_mode: mode });
     const { data } = await worker.recognize(imageToCanvas(img, OCR_W, deg));
     const parsed = parseLabelText(data.text);
     if (parsed.gc) return parsed;
   }
   return { gc: null, desc: null, candidates: [] };
+}
+
+// ── Scanning live ───────────────────────────────────────────────────────────
+//
+// The camera feed, read frame after frame, the way the ByBox app scans: point
+// it at the label and it registers — no shutter. Reading many frames also
+// lets it wait for two reads to agree before acting (see liveVerdict), which
+// catches the 7-read-as-a-1 that a single photograph lets through.
+//
+// It lives outside #app on purpose. The app redraws #app wholesale on every
+// change, and a <video> caught in that redraw loses its stream mid-scan. So
+// this view is mounted on <body>, updated by hand, and torn down when done.
+//
+// Frames are drawn to a canvas, read, and dropped. Nothing is recorded or
+// stored (ADR-0010), and the camera is released the moment the view closes,
+// the page is hidden, or a code is taken.
+let live = null;   // { root, stream, video, reads, started } | null
+
+function canScanLive() {
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.isSecureContext !== false);
+}
+
+function openLiveScan() {
+  if (live) return;
+  if (!canScanLive()) { takePhotoInstead(); return; }
+
+  const root = document.createElement('div');
+  root.className = 'live-scan';
+  root.innerHTML = `
+    <video class="live-video" playsinline muted autoplay></video>
+    <div class="live-top">
+      <div class="live-title">Scan the label</div>
+      <div class="live-sub">Fit the <b>top of the label</b> in the box — the GC number and the description.</div>
+    </div>
+    <div class="live-guide" aria-hidden="true"><span class="live-guide-hint">GC: &nbsp;······<br>Desc: ··········</span></div>
+    <div class="live-status" role="status" aria-live="polite">Starting the camera…</div>
+    <div class="live-bottom">
+      <button class="live-btn" data-live-cancel>Cancel</button>
+      <button class="live-btn quiet" data-live-photo>Take a photo instead</button>
+    </div>
+  `;
+  document.body.appendChild(root);
+  live = { root, stream: null, video: null, reads: [], started: 0 };
+
+  root.querySelector('[data-live-cancel]').addEventListener('click', closeLiveScan);
+  root.querySelector('[data-live-photo]').addEventListener('click', () => { closeLiveScan(); takePhotoInstead(); });
+
+  startLiveCamera(live);
+}
+
+async function startLiveCamera(l) {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1440 } },
+    });
+    if (live !== l) { stream.getTracks().forEach(t => t.stop()); return; }   // closed while asking
+    l.stream = stream;
+    const video = l.root.querySelector('.live-video');
+    video.srcObject = stream;
+    await video.play();
+    l.video = video;
+  } catch (e) {
+    if (live !== l) return;
+    // Refused, or no camera. The photo route asks for nothing but the photo.
+    setLiveStatus(e && e.name === 'NotAllowedError'
+      ? "The camera wasn't allowed. Take a photo instead, or allow the camera for this app in Settings."
+      : "The camera couldn't start here. Take a photo instead.", 'warn');
+    return;
+  }
+
+  try {
+    await loadOcr(m => {
+      if (live === l && /loading|initializ/i.test(m.status)) setLiveStatus('Setting up the label reader — about 7MB the first time, then it lives on your phone.');
+    });
+  } catch (e) {
+    if (live === l) setLiveStatus('The label reader could not load. Open the app once with signal and it will be there from then on.', 'warn');
+    return;
+  }
+
+  if (live !== l) return;
+  l.started = Date.now();
+  setLiveStatus('Looking for the GC number…');
+  liveLoop(l);
+}
+
+// Two ways of reading the same crop, alternated frame to frame. They fail
+// differently: on one test label, "single block" read Gc: 0612387 and "sparse
+// text" read cc: 612387; on the real labels it went the other way, sparse text
+// reading a 7 as a 1 that single block got right. Alternating gives the
+// agreement rule two different opinions to compare rather than one opinion
+// repeated.
+const LIVE_MODES = ['6', '11'];
+
+async function liveLoop(l) {
+  let n = 0;
+  while (live === l) {
+    const frame = grabGuideRegion(l.video, l.root.querySelector('.live-guide'));
+    if (frame) {
+      let parsed = { gc: null, desc: null };
+      try {
+        await _ocrWorker.setParameters({ tessedit_pageseg_mode: LIVE_MODES[n++ % LIVE_MODES.length] });
+        parsed = parseLabelText((await _ocrWorker.recognize(frame)).data.text);
+      } catch (e) { /* next frame */ }
+      if (live !== l) return;   // closed mid-read
+
+      l.reads.push({ gc: parsed.gc, desc: parsed.desc });
+      const v = liveVerdict(l.reads, state.parts);
+
+      if (v.accept) {
+        l.root.classList.add('got');
+        setLiveStatus('Got ' + v.gc, 'good');
+        await new Promise(r => setTimeout(r, 350));   // long enough to see it land
+        if (live !== l) return;
+        closeLiveScan();
+        finishScan({ printGc: v.gc, printDesc: v.desc }, '');
+        return;
+      }
+
+      const secs = (Date.now() - l.started) / 1000;
+      setLiveStatus(
+        v.tentative ? 'Reading ' + v.tentative + ' — hold still'
+        : secs > 16 ? 'Still nothing. More light helps — or take a photo instead.'
+        : secs > 8  ? 'Get closer — the GC number wants to fill most of the box, level with its edges.'
+        : 'Looking for the GC number…'
+      );
+    }
+    await new Promise(r => setTimeout(r, 120));
+  }
+}
+
+// The part of the frame inside the guide box, in the video's own pixels. The
+// video is shown object-fit: cover, so the box on screen has to be mapped back
+// through that scale and crop. Read at the width the print was measured at.
+function grabGuideRegion(video, guide) {
+  if (!video || !guide || !video.videoWidth) return null;
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const vr = video.getBoundingClientRect(), gr = guide.getBoundingClientRect();
+  const scale = Math.max(vr.width / vw, vr.height / vh);
+  const offX = (vr.width - vw * scale) / 2;
+  const offY = (vr.height - vh * scale) / 2;
+  let sx = (gr.left - vr.left - offX) / scale;
+  let sy = (gr.top - vr.top - offY) / scale;
+  let sw = gr.width / scale;
+  let sh = gr.height / scale;
+  sx = Math.max(0, sx); sy = Math.max(0, sy);
+  sw = Math.min(vw - sx, sw); sh = Math.min(vh - sy, sh);
+  if (sw < 40 || sh < 20) return null;
+
+  const c = document.createElement('canvas');
+  c.width = OCR_W;
+  c.height = Math.round(sh * (OCR_W / sw));
+  const g = c.getContext('2d');
+  g.filter = 'grayscale(1)';
+  g.drawImage(video, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  return c;
+}
+
+function setLiveStatus(text, tone) {
+  if (!live) return;
+  const el = live.root.querySelector('.live-status');
+  el.textContent = text;
+  el.className = 'live-status' + (tone ? ' ' + tone : '');
+}
+
+function closeLiveScan() {
+  if (!live) return;
+  const l = live;
+  live = null;
+  if (l.stream) l.stream.getTracks().forEach(t => t.stop());
+  if (l.video) l.video.srcObject = null;
+  l.root.remove();
+}
+
+function takePhotoInstead() {
+  const input = document.getElementById('scan-file');
+  if (input) input.click();
 }
 
 function runScan(file) {
@@ -966,7 +1143,7 @@ function buildScanSheet() {
           ${scanSheet.src ? `<img src="${scanSheet.src}" alt="The photo you took" class="scan-shot">` : ''}
           <div class="modal-btns">
             <button class="btn-cancel" data-close-sheet="scan">Type it instead</button>
-            <label class="btn-confirm" for="scan-file" style="text-align:center;line-height:1.4">Try again</label>
+            <button class="btn-confirm" data-live-scan="1">Scan again</button>
           </div>
         `}
       </div>
@@ -1264,6 +1441,12 @@ function attachListeners() {
     if (f) runScan(f);
   });
 
+  on('[data-live-scan]', 'click', () => {
+    scanSheet = null;
+    render();
+    openLiveScan();
+  });
+
   on('[data-maybe]', 'click', e => {
     const r = scanSheet.route;
     if (e.currentTarget.dataset.maybe === 'yes') {
@@ -1383,6 +1566,7 @@ const ICON_COG    = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 
 // ── Boot ────────────────────────────────────────────────────────────────────
 if (purgeLabelData(state)) save();
+document.addEventListener('visibilitychange', () => { if (document.hidden) closeLiveScan(); });
 applyTheme();
 render();
 
