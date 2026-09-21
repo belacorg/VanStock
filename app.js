@@ -226,7 +226,7 @@ function buildFind() {
       <label class="btn btn-quiet btn-block scan-btn" for="scan-file">
         ${ICON_CAMERA}<span>Scan the label</span>
       </label>
-      ${typed ? '' : '<div class="find-hint">Type the GC number, or what it is — &ldquo;powerhead valve&rdquo;. Scanning reads the barcode at the bottom right of the label, so aim at that rather than the whole box.</div>'}
+      ${typed ? '' : '<div class="find-hint">Type the GC number, or what it is — &ldquo;powerhead valve&rdquo;. To scan, get the <b>top of the label</b> — the GC number and the description — filling the screen, and hold it straight.</div>'}
     </div>
     ${typed ? buildFindResults(results, typed) : buildFindHome()}
   `;
@@ -615,6 +615,12 @@ function buildPartSheet() {
     <div class="modal-overlay" data-close-sheet="part">
       <div class="modal" data-stop="1">
         <h3>${editing ? 'Edit part' : 'Add a part'}</h3>
+        ${!editing && partSheet.readFromLabel === 'print' ? `
+          <div class="read-note">Read off the label. <b>Check the GC number against it</b> before you save — the reader gets most of them, and the ones it gets wrong are usually a 7 read as a 1.</div>
+        ` : ''}
+        ${!editing && partSheet.readFromLabel === 'barcode' ? `
+          <div class="read-note good">GC number read from the barcode, so it's exact. ${d.name ? 'Check the description.' : 'Type what it is — the description only comes off the print.'}</div>
+        ` : ''}
         <div class="modal-note">${editing ? 'Change what the van actually holds.' : 'The GC number and the box are what the lookup needs. The rest helps you find it when you can’t remember the number.'}</div>
 
         <div class="field">
@@ -795,6 +801,96 @@ function loadZxing() {
   return _zxingLoading;
 }
 
+// ── Reading the print ───────────────────────────────────────────────────────
+//
+// Tesseract, compiled to WebAssembly and vendored — the labels carry customer
+// names and addresses, so they are read on the phone and never sent anywhere.
+// About 7MB on first use: the engine (one of two builds, whichever the phone
+// supports) and the English model. Loaded on the first scan, not at boot, and
+// kept by the browser after that so later scans work with no signal.
+//
+// URLs are absolute because the model and engine are fetched from inside a
+// worker, where a relative path resolves against the worker script instead of
+// the page and quietly points at a folder that does not exist.
+const OCR_BASE = 'vendor/tesseract/';
+let _ocrWorker = null;
+let _ocrLoading = null;
+
+function ocrUrl(path) {
+  return new URL(OCR_BASE + path, location.href).href;
+}
+
+function loadOcr(onProgress) {
+  if (_ocrWorker) return Promise.resolve(_ocrWorker);
+  if (_ocrLoading) return _ocrLoading;
+  _ocrLoading = new Promise((resolve, reject) => {
+    const boot = () => {
+      window.Tesseract.createWorker('eng', 1, {
+        workerPath: ocrUrl('worker.min.js'),
+        corePath: ocrUrl('core'),
+        langPath: ocrUrl('lang'),
+        gzip: true,
+        logger: m => { if (onProgress && m && m.status) onProgress(m); },
+      }).then(w => { _ocrWorker = w; resolve(w); }, reject);
+    };
+    if (window.Tesseract) return boot();
+    const el = document.createElement('script');
+    el.src = ocrUrl('tesseract.min.js');
+    el.onload = boot;
+    el.onerror = () => reject(new Error('reader did not load'));
+    document.head.appendChild(el);
+  }).catch(e => { _ocrLoading = null; throw e; });
+  return _ocrLoading;
+}
+
+// The size the print is read at. Measured on real labels: the top of the label
+// framed tightly and read at this width got the GC code exactly on three in
+// five photographs that were never taken for the purpose — and that were
+// downscaled to a quarter of what a phone captures before they got here.
+const OCR_W = 1600;
+
+function imageToCanvas(img, width, deg) {
+  const scale = Math.min(1, width / img.naturalWidth);
+  const w = Math.round(img.naturalWidth * scale);
+  const h = Math.round(img.naturalHeight * scale);
+  const rad = (deg || 0) * Math.PI / 180;
+  const cw = Math.round(Math.abs(w * Math.cos(rad)) + Math.abs(h * Math.sin(rad)));
+  const ch = Math.round(Math.abs(w * Math.sin(rad)) + Math.abs(h * Math.cos(rad)));
+  const c = document.createElement('canvas');
+  c.width = cw;
+  c.height = ch;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, cw, ch);
+  g.translate(cw / 2, ch / 2);
+  g.rotate(rad);
+  // Greyscale only. Sharpening and contrast stretching were tried against the
+  // real labels and turned a correct code into a wrong one, a 9 read as an 8.
+  g.filter = 'grayscale(1)';
+  g.drawImage(img, -w / 2, -h / 2, w, h);
+  return c;
+}
+
+// Straight first, because an engineer holding a phone up to a label mostly
+// holds it straight. A tilt is tried only when straight found nothing — each
+// pass is a second or two on a phone, and a scan that takes fifteen seconds is
+// one nobody uses twice.
+const OCR_ATTEMPTS = [0, -8, 8];
+
+async function readPrint(img, onStage) {
+  const worker = await loadOcr(m => {
+    if (/loading|initializ/i.test(m.status) && onStage) onStage('loading');
+  });
+  if (onStage) onStage('reading');
+  await worker.setParameters({ tessedit_pageseg_mode: '6' });
+  for (const deg of OCR_ATTEMPTS) {
+    const { data } = await worker.recognize(imageToCanvas(img, OCR_W, deg));
+    const parsed = parseLabelText(data.text);
+    if (parsed.gc) return parsed;
+  }
+  return { gc: null, desc: null, candidates: [] };
+}
+
 // Big enough to keep the bars separable, small enough that a 12MP photograph
 // does not put 48MB of pixels on the heap of a phone in a cold van.
 const SCAN_MAX_W = 2400;
@@ -878,93 +974,136 @@ function knownStaffIds() {
 }
 
 function runScan(file) {
-  scanSheet = { status: 'reading', message: '', candidates: [], src: '' };
+  scanSheet = { status: 'reading', stage: 'reading', message: '', candidates: [], src: '' };
   render();
 
-  const reader = new FileReader();
-  reader.onload = () => {
-    const img = new Image();
-    img.onload = () => {
-      loadZxing()
-        .then(Z => {
-          const { pick, seen } = readGcFromImage(Z, img);
-          finishScan(pick, seen, String(reader.result));
-        })
-        .catch(() => {
-          scanSheet = { status: 'failed', message: 'The barcode reader could not load. Go online once and it will be there from then on.', candidates: [], src: '' };
-          render();
-        });
-    };
-    img.onerror = () => {
-      scanSheet = { status: 'failed', message: "That photo could not be opened.", candidates: [], src: '' };
-      render();
-    };
-    img.src = String(reader.result);
-  };
-  reader.onerror = () => {
-    scanSheet = { status: 'failed', message: "That photo could not be opened.", candidates: [], src: '' };
+  const fail = message => {
+    scanSheet = { status: 'failed', message, candidates: [], src: '' };
     render();
+  };
+
+  const reader = new FileReader();
+  reader.onerror = () => fail('That photo could not be opened.');
+  reader.onload = () => {
+    const src = String(reader.result);
+    const img = new Image();
+    img.onerror = () => fail('That photo could not be opened.');
+    img.onload = async () => {
+      // The barcode is tried first because it is quick and, when it reads,
+      // exact — it can overrule a digit the print got wrong. It does not
+      // carry the description, so the print is read regardless.
+      let barcode = { pick: { kind: 'none', candidates: [] }, seen: [] };
+      try {
+        const Z = await loadZxing();
+        barcode = readGcFromImage(Z, img);
+      } catch (e) { /* the print can still do the job */ }
+
+      if (barcode.pick.kind === 'ambiguous') {
+        scanSheet = { status: 'choose', message: '', candidates: barcode.pick.candidates, src };
+        render();
+        return;
+      }
+
+      let print = { gc: null, desc: null };
+      try {
+        print = await readPrint(img, stage => {
+          if (scanSheet && scanSheet.status === 'reading' && scanSheet.stage !== stage) {
+            scanSheet.stage = stage;
+            render();
+          }
+        });
+      } catch (e) {
+        if (barcode.pick.kind !== 'one') {
+          fail('The label reader could not load. Open the app once with signal and it will be there from then on.');
+          return;
+        }
+      }
+
+      if (barcode.pick.kind === 'one') {
+        state.knownIds = rememberStaffId(state.knownIds, barcode.pick.candidate.pickedFor);
+        save();
+      }
+
+      finishScan({
+        barcodeGc: barcode.pick.kind === 'one' ? barcode.pick.candidate.gc : null,
+        printGc: print.gc,
+        printDesc: print.desc,
+      }, src);
+    };
+    img.src = src;
   };
   reader.readAsDataURL(file);
 }
 
-function finishScan(pick, seen, src) {
-  if (pick.kind === 'ambiguous') {
-    // Two barcodes on the label that the ranking could not separate. Guessing
-    // here is how a tracking number ends up on the stock list as a part.
-    scanSheet = { status: 'choose', message: '', candidates: pick.candidates, src };
+function finishScan(read, src) {
+  const route = resolveScan(read, state.parts);
+
+  if (route.kind === 'found') {
+    scanSheet = null;
+    query = route.part.number;
+    activeTab = 'find';
+    toast('Read ' + route.part.number);
     render();
     return;
   }
 
-  if (pick.kind === 'one') {
-    useCandidate(pick.candidate);
+  if (route.kind === 'maybe') {
+    // One character off a part already on the van. Almost always that part —
+    // the label font's 7 reads as a 1 — but it is the engineer's call.
+    scanSheet = { status: 'maybe', route, src, candidates: [] };
+    render();
     return;
   }
 
-  // Nothing usable. Saying which barcodes *were* read is the difference
-  // between "it is broken" and "you have aimed at the wrong one".
-  const other = seen.filter(Boolean).length;
+  if (route.kind === 'new') {
+    scanSheet = null;
+    openPartSheet('add', null);
+    partSheet.draft.number = route.gc;
+    if (route.desc) partSheet.draft.name = route.desc;
+    partSheet.readFromLabel = route.fromPrint ? 'print' : 'barcode';
+    render();
+    return;
+  }
+
   scanSheet = {
     status: 'failed',
     candidates: [],
     src,
-    message: other
-      ? 'Read ' + other + ' barcode' + (other === 1 ? '' : 's') + ' on that label, but none of them was the GC one. It is the barcode at the bottom right, under the returns grid.'
-      : "Couldn't read a barcode. Get closer — the barcode wants to fill the frame on its own, not the whole label.",
+    message: "Couldn't find a GC number in that photo. Get the top of the label to fill the screen — the GC number and the description, not the whole label — and hold it straight.",
   };
   render();
 }
 
+// The chooser for two barcodes the ranking could not separate.
 function useCandidate(candidate) {
-  // Whoever the label was picked for, the app has now met their pay ID — so a
-  // second label from the same engineer will not have to be asked about.
   state.knownIds = rememberStaffId(state.knownIds, candidate.pickedFor);
   save();
-
-  const route = scanRoute(candidate.gc, state.parts);
-  const own = normaliseNumber(state.settings.staffId);
-  const theirs = own && candidate.pickedFor !== own;
-
-  scanSheet = null;
-
-  if (route.kind === 'found') {
-    query = route.part.number;
-    activeTab = 'find';
-    toast(theirs ? 'Read ' + route.part.number + " — that's another engineer's label" : 'Read ' + route.part.number);
-    render();
-    return;
-  }
-
-  openPartSheet('add', null);
-  partSheet.draft.number = route.gc;
-  toast('Read ' + route.gc + ' — not on the van yet');
-  render();
+  finishScan({ barcodeGc: candidate.gc }, '');
 }
 
 function buildScanSheet() {
   if (!scanSheet) return '';
   const reading = scanSheet.status === 'reading';
+
+  if (scanSheet.status === 'maybe') {
+    const r = scanSheet.route;
+    return `
+      <div class="modal-overlay" data-close-sheet="scan">
+        <div class="modal" data-stop="1">
+          <h3>Is it this one?</h3>
+          <div class="modal-note">The label read as <b class="row-num">${esc(r.gc)}</b>, which is one character off a part you carry. The label's 7s tend to read as 1s.</div>
+          <div class="card" style="margin-bottom:0">
+            <div class="row-title">${esc(r.part.name || 'Unnamed part')}</div>
+            <div class="row-sub"><span class="row-num">${esc(r.part.number)}</span><span class="box-chip plain">${esc(boxName(r.part.boxId))}</span></div>
+          </div>
+          <div class="modal-btns">
+            <button class="btn-cancel" data-maybe="no">No — it's new</button>
+            <button class="btn-confirm" data-maybe="yes">Yes, that's it</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
 
   if (scanSheet.status === 'choose') {
     const own = normaliseNumber(state.settings.staffId);
@@ -1001,7 +1140,9 @@ function buildScanSheet() {
       <div class="modal" data-stop="1">
         <h3>${reading ? 'Reading the label' : "Couldn't read it"}</h3>
         ${reading ? `
-          <div class="modal-note">Looking for the GC barcode.</div>
+          <div class="modal-note">${scanSheet.stage === 'loading'
+            ? 'Setting up the label reader. This is the one slow bit — about 7MB the first time, then it lives on your phone and works without signal.'
+            : 'Looking for the GC number and the description.'}</div>
           <div class="scan-working"><span class="scan-spinner"></span></div>
         ` : `
           <div class="modal-note">${esc(scanSheet.message)}</div>
@@ -1021,6 +1162,7 @@ function buildScanSheet() {
 function openPartSheet(mode, part) {
   partSheet = {
     mode,
+    readFromLabel: null,
     draft: part
       ? { ...part }
       : { id: null, number: '', name: '', make: MAKES[0], boxId: (state.boxes[0] || {}).id || '', qty: 1, dateCode: '', notes: '' },
@@ -1303,6 +1445,25 @@ function attachListeners() {
     // Cleared so photographing the same label twice still fires a change.
     e.target.value = '';
     if (f) runScan(f);
+  });
+
+  on('[data-maybe]', 'click', e => {
+    const r = scanSheet.route;
+    if (e.currentTarget.dataset.maybe === 'yes') {
+      scanSheet = null;
+      query = r.part.number;
+      activeTab = 'find';
+      toast('Got it — ' + r.part.number);
+      render();
+      return;
+    }
+    // Not the near miss: treat what was read as a new part, description and all.
+    scanSheet = null;
+    openPartSheet('add', null);
+    partSheet.draft.number = r.gc;
+    if (r.desc) partSheet.draft.name = r.desc;
+    partSheet.readFromLabel = 'print';
+    render();
   });
 
   on('[data-pick-candidate]', 'click', e => {

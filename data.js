@@ -151,6 +151,105 @@ function rememberStaffId(known, id) {
   return [clean].concat((known || []).filter(k => k !== clean)).slice(0, MAX_KNOWN_IDS);
 }
 
+// ── Reading the label's print ───────────────────────────────────────────────
+//
+// The barcode carries only the GC code and a staff ID. The description exists
+// only as print, so reading the label means reading text — and it turns out
+// the print is the more dependable of the two anyway.
+//
+// Measured against real labels, OCR reads the big bold GC code and the Desc
+// line well and reads their small grey captions badly: "GC:" came back as cc,
+// oc:, and "Desc:" as +:, c:, pesc:. Matching on the caption threw away
+// correct reads. So the anchor is the SHAPE of a GC code — six characters, at
+// least four of them digits — and a GC-looking caption is only a preference.
+// Nothing else on the label is six long: the location code is ten, the staff
+// ID seven, the tote eight, the WMIS number ten.
+//
+// Except a time. The pick date line carries 08:27:24, which strips to a
+// perfect 082724 and sits ABOVE the GC code. Hence the scoring.
+const GC_CAPTION = /^(gc|oc|cc|6c|ge|gg|go|c|g)[:;.,]*$/i;
+
+function parseLabelText(text) {
+  const lines = String(text == null ? '' : text).split('\n').map(l => l.trim()).filter(Boolean);
+  const cands = [];
+
+  lines.forEach((line, li) => {
+    const toks = line.split(/\s+/);
+    toks.forEach((raw, ti) => {
+      const clean = raw.replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+      if (!GC_PATTERN.test(clean)) return;
+      if ((clean.match(/\d/g) || []).length < 4) return;
+
+      let score = 0;
+      if (ti > 0 && GC_CAPTION.test(toks[ti - 1])) score += 3;
+      if (/\d{1,2}:\d{2}/.test(raw)) score -= 5;                  // 08:27:24
+      if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(line)) score -= 2;     // the date line
+      const next = lines[li + 1] || '';
+      if ((next.match(/[A-Za-z]{3,}/g) || []).length >= 2) score += 1;   // a Desc follows
+
+      cands.push({ gc: clean, li, score });
+    });
+  });
+
+  cands.sort((a, b) => b.score - a.score || a.li - b.li);
+  const best = cands[0] || null;
+  return {
+    gc: best ? best.gc : null,
+    desc: best ? descFromLine(lines[best.li + 1]) : null,
+    candidates: cands.map(c => c.gc),
+  };
+}
+
+// The Desc line, less whatever its caption came out as and the table rule OCR
+// reads down the right-hand edge as | or \.
+function descFromLine(line) {
+  if (!line) return null;
+  const d = String(line)
+    .replace(/^.{0,8}?(desc|esc|sc|c|\+)\s*[:;.]\s*/i, '')
+    .replace(/^[^A-Za-z0-9(\[]+/, '')
+    .replace(/[\s|\\/]+$/, '')
+    .trim();
+  return d || null;
+}
+
+// A misread is almost always one character — 7 read as 1, C read as 0. If the
+// code off the label is one substitution from exactly one part on the van,
+// that part is very probably the one in hand. Two candidates is not a guess
+// worth making.
+function nearestPartByGc(gc, parts) {
+  const g = normaliseNumber(gc);
+  if (!g) return null;
+  const close = (parts || []).filter(p => {
+    const n = normaliseNumber(p.number);
+    if (n.length !== g.length || n === g) return false;
+    let diff = 0;
+    for (let i = 0; i < n.length; i++) if (n[i] !== g[i] && ++diff > 1) return false;
+    return diff === 1;
+  });
+  return close.length === 1 ? close[0] : null;
+}
+
+// Where a scan lands. A barcode read is exact and a print read is a good
+// guess, so the barcode's code wins when both came back — the print still
+// supplies the description, which the barcode never carries.
+function resolveScan(read, parts) {
+  const r = read || {};
+  const gc = normaliseNumber(r.barcodeGc || r.printGc);
+  if (!gc) return { kind: 'unreadable' };
+  const fromPrint = !r.barcodeGc;
+
+  const exact = (parts || []).find(p => normaliseNumber(p.number) === gc);
+  if (exact) return { kind: 'found', part: exact, gc, fromPrint };
+
+  // Only a print read can be a misread; a barcode that decoded is right.
+  if (fromPrint) {
+    const near = nearestPartByGc(gc, parts);
+    if (near) return { kind: 'maybe', part: near, gc, desc: r.printDesc || null };
+  }
+
+  return { kind: 'new', gc, desc: r.printDesc || null, fromPrint };
+}
+
 // What to do with a code once it has been read off a label. Kept here, away
 // from the camera plumbing, because this is the part with a decision in it.
 function scanRoute(gc, parts) {
@@ -416,6 +515,10 @@ if (typeof module !== 'undefined' && module.exports) {
     GC_BARCODE,
     MAX_KNOWN_IDS,
     scanRoute,
+    parseLabelText,
+    descFromLine,
+    nearestPartByGc,
+    resolveScan,
     CHASE_AFTER_DAYS,
     STALE_AFTER_DAYS,
     normaliseNumber,

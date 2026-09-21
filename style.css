@@ -575,6 +575,20 @@ select.field-input {
   margin-bottom: 4px;
 }
 
+/* What the Add sheet says when the label filled it in. Amber for print —
+   good, not guaranteed — green for a barcode, which is exact. */
+.read-note {
+  background: rgba(255, 200, 87, 0.12);
+  border: 1px solid rgba(255, 200, 87, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  margin: 4px 0 14px;
+}
+.read-note b { color: var(--amber); }
+.read-note.good { background: rgba(95, 210, 138, 0.12); border-color: rgba(95, 210, 138, 0.3); }
+
 /* ── Toast ── */
 .toast {
   position: fixed;
