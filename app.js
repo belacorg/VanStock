@@ -37,12 +37,7 @@ function blankState() {
     parts: [],
     loans: [],
     engineers: [],          // { name, phone } — so a lent part can be rung for
-    // Staff IDs the app has met, newest first. Grown by scans going through,
-    // which is how it learns the pay IDs of the engineers it borrows from.
-    knownIds: [],
-    // staffId is the engineer's own payroll number, used only to tell the GC
-    // barcode from the tracking and tote barcodes beside it on a label.
-    settings: { remindAfter: 4, theme: 'dark', staffId: '' },
+    settings: { remindAfter: 4, theme: 'dark' },
   };
 }
 
@@ -60,11 +55,22 @@ function loadState() {
       parts: Array.isArray(parsed.parts) ? parsed.parts : [],
       loans: Array.isArray(parsed.loans) ? parsed.loans : [],
       engineers: Array.isArray(parsed.engineers) ? parsed.engineers : [],
-      knownIds: Array.isArray(parsed.knownIds) ? parsed.knownIds : [],
     };
   } catch {
     return blankState();
   }
+}
+
+// Nothing off a label is kept except the GC number and the description
+// (ADR-0010). Builds before that one stored every staff ID the barcode reader
+// met — colleagues' pay numbers — and the engineer's own. Strip both from any
+// phone that still has them; boot saves the result so they are gone for good,
+// not merely ignored.
+function purgeLabelData(st) {
+  let purged = false;
+  if ('knownIds' in st) { delete st.knownIds; purged = true; }
+  if (st.settings && 'staffId' in st.settings) { delete st.settings.staffId; purged = true; }
+  return purged;
 }
 
 function save() {
@@ -539,16 +545,6 @@ function buildSettings() {
     </div>
     <div class="field-hint" style="margin:6px 2px 0">Labels are optional. &ldquo;Box 3&rdquo; is a fine name if that's what's written on the lid.</div>
 
-    <div class="section-label">Scanning</div>
-    <div class="card">
-      <div class="field" style="margin-bottom:0">
-        <label class="field-label" for="staff-id">Your staff ID</label>
-        <input class="field-input num" id="staff-id" inputmode="numeric" autocomplete="off"
-               placeholder="0000002" value="${esc(state.settings.staffId || '')}">
-        <div class="field-hint">A label carries four or five barcodes and more than one can look like a stock code. The GC barcode ends in the staff ID of whoever the part was picked for, so knowing yours helps the app pick the right one — it's on every label next to your name.<br><br>A part another engineer lends you carries <b>their</b> ID, not yours, and those scan perfectly well. The app remembers every ID it meets, so the second label from the same engineer never needs asking about.</div>
-      </div>
-    </div>
-
     <div class="section-label">Reminders</div>
     <div class="card">
       <div class="field">
@@ -617,9 +613,6 @@ function buildPartSheet() {
         <h3>${editing ? 'Edit part' : 'Add a part'}</h3>
         ${!editing && partSheet.readFromLabel === 'print' ? `
           <div class="read-note">Read off the label. <b>Check the GC number against it</b> before you save — the reader gets most of them, and the ones it gets wrong are usually a 7 read as a 1.</div>
-        ` : ''}
-        ${!editing && partSheet.readFromLabel === 'barcode' ? `
-          <div class="read-note good">GC number read from the barcode, so it's exact. ${d.name ? 'Check the description.' : 'Type what it is — the description only comes off the print.'}</div>
         ` : ''}
         <div class="modal-note">${editing ? 'Change what the van actually holds.' : 'The GC number and the box are what the lookup needs. The rest helps you find it when you can’t remember the number.'}</div>
 
@@ -770,37 +763,6 @@ function buildBoxSheet() {
   `;
 }
 
-// ── Reading the label ───────────────────────────────────────────────────────
-//
-// Every dispatch label carries the GC code in its bottom-right barcode,
-// followed by the staff ID of the engineer it was picked for: 612340 +
-// 0000001. Reading that is exact where reading print is a guess.
-//
-// The hard part is not decoding, it is resolution. Photograph the whole box
-// and the barcode lands about 300 pixels wide and skewed, which is not enough
-// bar detail to recover — tested against five real labels, where only the
-// large flat tracking barcode came back. Aimed at, filling the frame, it is
-// several times that. So the instruction is aim at the barcode, not the label,
-// and everything below is built to fail honestly when it cannot read one.
-
-const ZXING_SRC = 'vendor/zxing.min.js';
-let _zxingLoading = null;
-
-// 336KB, so it loads on the first scan rather than on every cold start of an
-// app whose whole point is answering in the time it takes to type six digits.
-function loadZxing() {
-  if (window.ZXing) return Promise.resolve(window.ZXing);
-  if (_zxingLoading) return _zxingLoading;
-  _zxingLoading = new Promise((resolve, reject) => {
-    const el = document.createElement('script');
-    el.src = ZXING_SRC;
-    el.onload = () => (window.ZXing ? resolve(window.ZXing) : reject(new Error('reader did not load')));
-    el.onerror = () => reject(new Error('reader did not load'));
-    document.head.appendChild(el);
-  });
-  return _zxingLoading;
-}
-
 // ── Reading the print ───────────────────────────────────────────────────────
 //
 // Tesseract, compiled to WebAssembly and vendored — the labels carry customer
@@ -891,88 +853,6 @@ async function readPrint(img, onStage) {
   return { gc: null, desc: null, candidates: [] };
 }
 
-// Big enough to keep the bars separable, small enough that a 12MP photograph
-// does not put 48MB of pixels on the heap of a phone in a cold van.
-const SCAN_MAX_W = 2400;
-
-function imageToGrey(img) {
-  const scale = Math.min(1, SCAN_MAX_W / img.naturalWidth);
-  const w = Math.round(img.naturalWidth * scale);
-  const h = Math.round(img.naturalHeight * scale);
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0, w, h);
-  const rgba = ctx.getImageData(0, 0, w, h).data;
-  const grey = new Uint8ClampedArray(w * h);
-  for (let i = 0, p = 0; i < rgba.length; i += 4, p++) {
-    grey[p] = (306 * rgba[i] + 601 * rgba[i + 1] + 117 * rgba[i + 2] + 512) >> 10;
-  }
-  return { grey, w, h };
-}
-
-function cropGrey(grey, w, h, x0, y0, cw, ch) {
-  const out = new Uint8ClampedArray(cw * ch);
-  for (let y = 0; y < ch; y++) {
-    const from = (y0 + y) * w + x0;
-    out.set(grey.subarray(from, from + cw), y * cw);
-  }
-  return out;
-}
-
-function decodeRegion(Z, grey, w, h) {
-  const hints = new Map();
-  hints.set(Z.DecodeHintType.TRY_HARDER, true);
-  const out = [];
-  // Two binarizers because they fail on opposite things: the adaptive one on
-  // even, low-contrast print, the global one on a label half in shadow.
-  for (const Bin of [Z.HybridBinarizer, Z.GlobalHistogramBinarizer]) {
-    try {
-      const reader = new Z.MultiFormatReader();
-      reader.setHints(hints);
-      const src = new Z.RGBLuminanceSource(grey, w, h);
-      out.push(reader.decode(new Z.BinaryBitmap(new Bin(src)), hints).getText());
-    } catch (e) { /* this binarizer found nothing */ }
-  }
-  return out;
-}
-
-// Regions in the order they are worth trying: the middle band, because that is
-// where an engineer aiming at a barcode will have put it; then the whole frame;
-// then halves, for a photograph taken in a hurry.
-//
-// A region is taken as a whole. Everything it decodes is ranked together, so
-// a frame that catches the tracking barcode beside the GC one gets a choice
-// made between them rather than whichever came back first.
-function readGcFromImage(Z, img) {
-  const { grey, w, h } = imageToGrey(img);
-  const bands = [
-    [0, Math.floor(h * 0.30), w, Math.floor(h * 0.40)],
-    [0, 0, w, h],
-    [0, 0, w, Math.floor(h / 2)],
-    [0, Math.floor(h / 2), w, h - Math.floor(h / 2)],
-  ];
-  const opts = { knownIds: knownStaffIds(), parts: state.parts };
-  const seen = [];
-
-  for (const [x, y, bw, bh] of bands) {
-    if (bw < 40 || bh < 20) continue;
-    const region = (x === 0 && y === 0 && bw === w && bh === h) ? grey : cropGrey(grey, w, h, x, y, bw, bh);
-    const payloads = decodeRegion(Z, region, bw, bh);
-    for (const t of payloads) seen.push(t);
-    const pick = pickGcCandidate(payloads, opts);
-    if (pick.kind !== 'none') return { pick, seen };
-  }
-  return { pick: { kind: 'none', candidates: [] }, seen };
-}
-
-// The engineer's own ID first, then every other one a scan has confirmed.
-function knownStaffIds() {
-  const own = normaliseNumber(state.settings.staffId);
-  return own ? [own].concat(state.knownIds || []) : (state.knownIds || []);
-}
-
 function runScan(file) {
   scanSheet = { status: 'reading', stage: 'reading', message: '', candidates: [], src: '' };
   render();
@@ -989,21 +869,6 @@ function runScan(file) {
     const img = new Image();
     img.onerror = () => fail('That photo could not be opened.');
     img.onload = async () => {
-      // The barcode is tried first because it is quick and, when it reads,
-      // exact — it can overrule a digit the print got wrong. It does not
-      // carry the description, so the print is read regardless.
-      let barcode = { pick: { kind: 'none', candidates: [] }, seen: [] };
-      try {
-        const Z = await loadZxing();
-        barcode = readGcFromImage(Z, img);
-      } catch (e) { /* the print can still do the job */ }
-
-      if (barcode.pick.kind === 'ambiguous') {
-        scanSheet = { status: 'choose', message: '', candidates: barcode.pick.candidates, src };
-        render();
-        return;
-      }
-
       let print = { gc: null, desc: null };
       try {
         print = await readPrint(img, stage => {
@@ -1013,22 +878,11 @@ function runScan(file) {
           }
         });
       } catch (e) {
-        if (barcode.pick.kind !== 'one') {
-          fail('The label reader could not load. Open the app once with signal and it will be there from then on.');
-          return;
-        }
+        fail('The label reader could not load. Open the app once with signal and it will be there from then on.');
+        return;
       }
 
-      if (barcode.pick.kind === 'one') {
-        state.knownIds = rememberStaffId(state.knownIds, barcode.pick.candidate.pickedFor);
-        save();
-      }
-
-      finishScan({
-        barcodeGc: barcode.pick.kind === 'one' ? barcode.pick.candidate.gc : null,
-        printGc: print.gc,
-        printDesc: print.desc,
-      }, src);
+      finishScan({ printGc: print.gc, printDesc: print.desc }, src);
     };
     img.src = src;
   };
@@ -1060,7 +914,7 @@ function finishScan(read, src) {
     openPartSheet('add', null);
     partSheet.draft.number = route.gc;
     if (route.desc) partSheet.draft.name = route.desc;
-    partSheet.readFromLabel = route.fromPrint ? 'print' : 'barcode';
+    partSheet.readFromLabel = 'print';
     render();
     return;
   }
@@ -1072,13 +926,6 @@ function finishScan(read, src) {
     message: "Couldn't find a GC number in that photo. Get the top of the label to fill the screen — the GC number and the description, not the whole label — and hold it straight.",
   };
   render();
-}
-
-// The chooser for two barcodes the ranking could not separate.
-function useCandidate(candidate) {
-  state.knownIds = rememberStaffId(state.knownIds, candidate.pickedFor);
-  save();
-  finishScan({ barcodeGc: candidate.gc }, '');
 }
 
 function buildScanSheet() {
@@ -1099,36 +946,6 @@ function buildScanSheet() {
           <div class="modal-btns">
             <button class="btn-cancel" data-maybe="no">No — it's new</button>
             <button class="btn-confirm" data-maybe="yes">Yes, that's it</button>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  if (scanSheet.status === 'choose') {
-    const own = normaliseNumber(state.settings.staffId);
-    return `
-      <div class="modal-overlay" data-close-sheet="scan">
-        <div class="modal" data-stop="1">
-          <h3>Which one is the part?</h3>
-          <div class="modal-note">That photo caught more than one barcode and they look alike. Pick the stock code and the app will know the difference next time.</div>
-          <div class="card flush">
-            ${scanSheet.candidates.map((c, i) => {
-              const part = state.parts.find(p => normaliseNumber(p.number) === c.gc);
-              const mine = own && c.pickedFor === own;
-              return `
-                <button class="row" data-pick-candidate="${i}">
-                  <span class="row-main">
-                    <span class="row-title row-num">${esc(c.gc)}</span>
-                    <span class="row-sub">${part ? esc(part.name) : 'Not on the van'}${mine ? ' &middot; picked for you' : ''}</span>
-                  </span>
-                  <span class="row-right"><span class="chevron">&#8250;</span></span>
-                </button>
-              `;
-            }).join('')}
-          </div>
-          <div class="modal-btns">
-            <button class="btn-cancel" data-close-sheet="scan">Neither — type it</button>
           </div>
         </div>
       </div>
@@ -1466,16 +1283,6 @@ function attachListeners() {
     render();
   });
 
-  on('[data-pick-candidate]', 'click', e => {
-    useCandidate(scanSheet.candidates[Number(e.currentTarget.dataset.pickCandidate)]);
-  });
-
-  const staffId = document.getElementById('staff-id');
-  if (staffId) staffId.addEventListener('change', e => {
-    state.settings.staffId = normaliseNumber(e.target.value);
-    save();
-  });
-
   on('[data-add-box]', 'click', () => { boxSheet = { mode: 'add', id: null, label: '' }; render(); });
   on('[data-edit-box]', 'click', e => {
     const b = findBox(e.currentTarget.dataset.editBox);
@@ -1575,6 +1382,7 @@ const ICON_CAMERA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 const ICON_COG    = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.6.76 1 1.4 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
 
 // ── Boot ────────────────────────────────────────────────────────────────────
+if (purgeLabelData(state)) save();
 applyTheme();
 render();
 
