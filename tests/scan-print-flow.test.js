@@ -23,14 +23,6 @@ describe('scanning a part that is not on the van', () => {
     expect(app.$('.read-note').textContent).toContain('Check the GC number');
   });
 
-  it('says a barcode read is exact, and that the description needs typing', () => {
-    const app = boot();
-    app.window.finishScan({ barcodeGc: '619900' }, '');
-    const note = app.$('.read-note.good').textContent;
-    expect(note).toContain('exact');
-    expect(note).toContain('Type what it is');
-  });
-
   it('does not carry the note into an Add opened by hand afterwards', () => {
     const app = boot();
     app.window.finishScan({ printGc: '619900', printDesc: 'x' }, '');

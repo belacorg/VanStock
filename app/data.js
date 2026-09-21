@@ -81,81 +81,11 @@ function isGcCode(raw) {
   return GC_PATTERN.test(normaliseNumber(raw));
 }
 
-// The bottom-right barcode on the label carries the GC code followed by the
-// seven-digit staff ID of the engineer the part was picked FOR — 612340 +
-// 0000001. Reading it is exact where reading print is a guess.
-//
-// That trailing ID is NOT necessarily this engineer's. A part lent by another
-// engineer arrives on their label, with their pay ID on it, and refusing those
-// would refuse exactly the parts the lending half of this app exists for.
-//
-// But the shape alone is not enough either: a ByBox tracking number can be
-// thirteen digits too, and then "six characters of code, seven of ID" fits it
-// perfectly and yields a stock code that never existed. So candidates are
-// ranked rather than filtered, and where the ranking cannot separate them the
-// engineer is asked — and the answer is remembered, so the next label from the
-// same engineer is unambiguous.
-const GC_BARCODE = /^[0-9A-Z]{6}[0-9]{7}$/;
-
-function gcCandidate(payload) {
-  const clean = normaliseNumber(payload);
-  if (!GC_BARCODE.test(clean)) return null;
-  return { gc: clean.slice(0, GC_LENGTH), pickedFor: clean.slice(GC_LENGTH), payload: clean };
-}
-
-// Every staff ID the app has met scores highest, because a tracking number's
-// last seven digits will not be one. A GC already on the van scores next: the
-// engineer is usually looking at a part they carry. Leading zero is the weakest
-// signal and is only ever a tie-breaker — it is a pattern observed across the
-// pay IDs seen so far, not a rule anybody published.
-function rankGcCandidates(payloads, opts) {
-  const o = opts || {};
-  const ids = new Set((o.knownIds || []).map(normaliseNumber).filter(Boolean));
-  const stock = new Set((o.parts || []).map(p => normaliseNumber(p.number)));
-  const seen = new Set();
-
-  return (payloads || [])
-    .map(gcCandidate)
-    .filter(Boolean)
-    .filter(c => (seen.has(c.payload) ? false : seen.add(c.payload)))
-    .map(c => {
-      let score = 0;
-      if (ids.has(c.pickedFor)) score += 4;
-      if (stock.has(c.gc)) score += 2;
-      if (c.pickedFor.charAt(0) === '0') score += 1;
-      return Object.assign({ score }, c);
-    })
-    .sort((a, b) => b.score - a.score || a.payload.localeCompare(b.payload));
-}
-
-// One candidate, or a clear winner, is an answer. Two that the ranking cannot
-// separate is a question — and guessing there would put a tracking number on
-// the stock list as though it were a part.
-function pickGcCandidate(payloads, opts) {
-  const ranked = rankGcCandidates(payloads, opts);
-  if (!ranked.length) return { kind: 'none', candidates: [] };
-  if (ranked.length === 1 || ranked[0].score > ranked[1].score) {
-    return { kind: 'one', candidate: ranked[0], candidates: ranked };
-  }
-  return { kind: 'ambiguous', candidates: ranked };
-}
-
-// Every ID confirmed by a scan the engineer accepted, newest first. This is how
-// the app comes to know the pay IDs of the engineers it borrows from: it is
-// told once, by a scan going through, and never has to ask about them again.
-const MAX_KNOWN_IDS = 40;
-
-function rememberStaffId(known, id) {
-  const clean = normaliseNumber(id);
-  if (!clean) return known || [];
-  return [clean].concat((known || []).filter(k => k !== clean)).slice(0, MAX_KNOWN_IDS);
-}
-
 // ── Reading the label's print ───────────────────────────────────────────────
 //
-// The barcode carries only the GC code and a staff ID. The description exists
-// only as print, so reading the label means reading text — and it turns out
-// the print is the more dependable of the two anyway.
+// The description exists only as print, and in the field the print turned
+// out to be the dependable way to the GC code too (ADR-0009). Nothing else on
+// the label is read or kept (ADR-0010).
 //
 // Measured against real labels, OCR reads the big bold GC code and the Desc
 // line well and reads their small grey captions badly: "GC:" came back as cc,
@@ -229,34 +159,21 @@ function nearestPartByGc(gc, parts) {
   return close.length === 1 ? close[0] : null;
 }
 
-// Where a scan lands. A barcode read is exact and a print read is a good
-// guess, so the barcode's code wins when both came back — the print still
-// supplies the description, which the barcode never carries.
+// Where a scan lands. The code comes off the print, so it can be a misread —
+// one character off a part already on the van is asked about rather than
+// taken on trust or thrown away.
 function resolveScan(read, parts) {
   const r = read || {};
-  const gc = normaliseNumber(r.barcodeGc || r.printGc);
+  const gc = normaliseNumber(r.printGc);
   if (!gc) return { kind: 'unreadable' };
-  const fromPrint = !r.barcodeGc;
 
   const exact = (parts || []).find(p => normaliseNumber(p.number) === gc);
-  if (exact) return { kind: 'found', part: exact, gc, fromPrint };
+  if (exact) return { kind: 'found', part: exact, gc };
 
-  // Only a print read can be a misread; a barcode that decoded is right.
-  if (fromPrint) {
-    const near = nearestPartByGc(gc, parts);
-    if (near) return { kind: 'maybe', part: near, gc, desc: r.printDesc || null };
-  }
+  const near = nearestPartByGc(gc, parts);
+  if (near) return { kind: 'maybe', part: near, gc, desc: r.printDesc || null };
 
-  return { kind: 'new', gc, desc: r.printDesc || null, fromPrint };
-}
-
-// What to do with a code once it has been read off a label. Kept here, away
-// from the camera plumbing, because this is the part with a decision in it.
-function scanRoute(gc, parts) {
-  if (!gc) return { kind: 'unreadable' };
-  const norm = normaliseNumber(gc);
-  const part = (parts || []).find(p => normaliseNumber(p.number) === norm);
-  return part ? { kind: 'found', part } : { kind: 'new', gc: norm };
+  return { kind: 'new', gc, desc: r.printDesc || null };
 }
 
 // ── Search ──────────────────────────────────────────────────────────────────
@@ -508,13 +425,6 @@ if (typeof module !== 'undefined' && module.exports) {
     GC_LENGTH,
     GC_PATTERN,
     isGcCode,
-    gcCandidate,
-    rankGcCandidates,
-    pickGcCandidate,
-    rememberStaffId,
-    GC_BARCODE,
-    MAX_KNOWN_IDS,
-    scanRoute,
     parseLabelText,
     descFromLine,
     nearestPartByGc,

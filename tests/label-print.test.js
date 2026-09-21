@@ -118,21 +118,11 @@ describe('where a scan lands', () => {
     expect(r.part.number).toBe('712387');
   });
 
-  // A barcode that decoded is right. There is nothing to second-guess.
-  it('never "did you means" a barcode read', () => {
-    expect(data.resolveScan({ barcodeGc: '112387' }, VAN).kind).toBe('new');
-  });
-
-  it('prefers the barcode code but keeps the printed description', () => {
-    const r = data.resolveScan({ barcodeGc: '612340', printGc: '612348', printDesc: 'Powerhead' }, []);
-    expect(r).toMatchObject({ kind: 'new', gc: '612340', desc: 'Powerhead', fromPrint: false });
-  });
-
   // The thing Jake asked for: scan a part not on the van and get BOTH the
   // code and the description filled in.
   it('carries the description through for a part not on the van', () => {
     const r = data.resolveScan({ printGc: '619900', printDesc: '[H] Hive Active Plug SLP3' }, VAN);
-    expect(r).toMatchObject({ kind: 'new', gc: '619900', desc: '[H] Hive Active Plug SLP3', fromPrint: true });
+    expect(r).toMatchObject({ kind: 'new', gc: '619900', desc: '[H] Hive Active Plug SLP3' });
   });
 
   it('says so when nothing was read at all', () => {

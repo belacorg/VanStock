@@ -18,9 +18,6 @@ _Avoid_: "part number" (ambiguous with the manufacturer's own), "SKU", "product 
 **Manufacturer number**:
 The number moulded into or printed on the part itself — eleven digits for Worcester, ten for Vaillant. Not what the app is organised around, but held against a line in `alt` so a part whose label has come off can still be found.
 
-**Picked for**:
-The engineer a part was issued to, identified by the seven-digit staff ID in the GC barcode. **Not necessarily the engineer holding the part** — one lent to you arrives on the lender's label, carrying the lender's ID. The app uses it to tell the GC barcode from the tracking barcode beside it, never to decide whose part it is.
-
 **Desc**:
 The part description on the dispatch label, straight under the **GC number**. Free text as the warehouse wrote it: "Powerhead for V4073A Valves", "(H) Hive Active Plug SLP3".
 
@@ -57,5 +54,5 @@ A part carried six months or more without being used. The app reports the tally;
 
 ## Not built yet
 
-- **Scanning a label.** The obvious next step, and the one that would make putting the stock in bearable. Barcodes on parts boxes are inconsistent between manufacturers, so the first version is likely OCR of the printed number rather than a barcode read.
+- **Scanning without a photo.** Reading the label live off the camera, the way the ByBox app does, so there is no shutter to press.
 - **Sharing stock between engineers.** "Who on the patch has one?" is the natural sequel to "have I got one", but it needs a server and accounts, which this app deliberately has none of (ADR-0006).

@@ -25,7 +25,7 @@ The GC code is found by its shape — six characters, four or more digits — be
 
 This label font's 7 reads as a 1. A read one character off a part already on the van is asked about; anything else goes to the Add sheet with a note to check the number.
 
-The barcode reader stays as a cross-check: when it does read, it is exact and overrules the print's code.
+The barcode reader was kept at first as a cross-check, and then removed (ADR-0010): it never read in the field, and choosing the right barcode meant storing the pay IDs printed on them.
 
 ## Consequences
 First field test, on a real phone at full resolution: one read right first time; one read a 7 as a 1, and a clearer retake read it right. That is the expected failure, and the engineer caught it by eye.
