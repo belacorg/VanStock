@@ -589,6 +589,104 @@ select.field-input {
 .read-note b { color: var(--amber); }
 .read-note.good { background: rgba(95, 210, 138, 0.12); border-color: rgba(95, 210, 138, 0.3); }
 
+/* ── Scanning live ──
+   Full screen and always dark, whatever the theme: it is a viewfinder, and a
+   white frame around a camera feed in a van at night is a torch in the eyes. */
+.live-scan {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  background: #000;
+  color: #fff;
+  overflow: hidden;
+  font-family: var(--vs-font-sans);
+}
+.live-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.live-top {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 14px;
+  background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0));
+  text-align: center;
+}
+.live-title { font-size: 1rem; font-weight: 700; letter-spacing: -0.3px; }
+.live-sub { font-size: 0.8rem; color: rgba(255,255,255,0.8); margin-top: 4px; line-height: 1.45; }
+.live-sub b { color: #fff; }
+
+/* The box the label's top two lines go in. Wide and short because that is
+   the shape of the GC and Desc lines — and a tight crop is what reads well:
+   the same labels got 0/5 read whole and 3/5 read on just those lines. The
+   shadow darkens everything outside it, so the eye goes where the reader
+   looks. */
+.live-guide {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  top: 30%;
+  aspect-ratio: 3 / 1;
+  border: 3px solid rgba(255,255,255,0.95);
+  border-radius: 14px;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s;
+}
+.live-guide-hint {
+  font-size: 0.72rem;
+  line-height: 1.8;
+  color: rgba(255,255,255,0.35);
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+.live-scan.got .live-guide { border-color: var(--vs-green); }
+.live-scan.got .live-guide-hint { display: none; }
+
+.live-status {
+  position: absolute;
+  left: 20px; right: 20px;
+  top: calc(30% + (88vw / 3) + 18px);
+  text-align: center;
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.45;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+.live-status.good { color: var(--vs-green); }
+.live-status.warn { color: var(--vs-amber); }
+
+.live-bottom {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  display: flex;
+  gap: 10px;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,0.75));
+}
+.live-btn {
+  flex: 1;
+  padding: 14px;
+  border-radius: 12px;
+  border: none;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  background: rgba(255,255,255,0.18);
+  color: #fff;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.live-btn.quiet { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.85); }
+.live-btn:active { opacity: 0.7; }
+
 /* ── Toast ── */
 .toast {
   position: fixed;

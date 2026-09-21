@@ -45,6 +45,28 @@ describe('finding the GC code in what OCR read', () => {
     expect(data.parseLabelText('GC: 712340\nDesc: Powerhead for V4073A Valves').gc).toBe('712340');
   });
 
+  // The gap after the caption's colon read as a 0 and glued to the code —
+  // seen on the live camera path, in "single block" mode.
+  it('drops a stray 0 or O read into the front of the code', () => {
+    expect(data.parseLabelText('Loc: FL0000001R ~~ Gc: 0612387\nDesc: Altecnic Filling Loop').gc).toBe('612387');
+    expect(data.parseLabelText('GC: O612387\nDesc: Altecnic Filling Loop').gc).toBe('612387');
+  });
+
+  // Dropping whichever end makes six would turn a stray at the far end into a
+  // confident wrong code — and repeat it on every frame, so two reads would
+  // "agree" on it. Better no read than that one.
+  it('does not guess which end a different stray character is on', () => {
+    expect(data.parseLabelText('GC: 6123870\nDesc: Altecnic Filling Loop').gc).toBe(null);
+    expect(data.parseLabelText('GC: 7612387\nDesc: Altecnic Filling Loop').gc).toBe(null);
+  });
+
+  // A seven-digit number starting with 0 on this label is a staff ID. Trimming
+  // is only ever for a code that sits right after a GC caption.
+  it('never trims a staff ID into a code', () => {
+    expect(data.parseLabelText('ID: 0000001\nName: SOMEONE').gc).toBe(null);
+    expect(data.parseLabelText('0000001').gc).toBe(null);
+  });
+
   it('finds nothing in text with no code in it', () => {
     expect(data.parseLabelText('Each\nSite: Depot').gc).toBe(null);
     expect(data.parseLabelText('').gc).toBe(null);

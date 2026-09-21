@@ -29,6 +29,7 @@ const SHAPES = [
 
 const INVENTED = new Set([
   '0000001', '0000002', '0000003',
+  '0612387',   // the demo code 612387 with the stray 0 OCR glues to its front
   'FL0000001R', 'VN000000001', 'Y90000000001',
   '21000001', '1700000001',
 ]);

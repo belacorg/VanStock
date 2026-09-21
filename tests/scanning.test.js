@@ -13,18 +13,16 @@ const STOCK = [
 describe('the scan button', () => {
   it('sits on the Find screen, where the lookup happens', () => {
     const app = bootApp({ storage: { vs_state: seedState() } });
-    const btn = app.$('.scan-btn');
-    expect(btn).toBeTruthy();
-    expect(btn.getAttribute('for')).toBe('scan-file');
+    expect(app.$('.scan-btn[data-live-scan]')).toBeTruthy();
   });
 
-  // capture="environment" is what makes a phone open the back camera instead
-  // of the photo library. Without it this is a file picker, not a scanner.
-  it('opens the back camera rather than the photo library', () => {
+  // The photo route stays as the fallback for a phone that will not share its
+  // camera feed, and capture="environment" is what makes it open the back
+  // camera rather than the photo library.
+  it('keeps a photo route that opens the back camera', () => {
     const app = bootApp({ storage: { vs_state: seedState() } });
     const input = app.$('#scan-file');
     expect(input.getAttribute('capture')).toBe('environment');
     expect(input.getAttribute('accept')).toBe('image/*');
   });
 });
-

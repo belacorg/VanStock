@@ -33,3 +33,12 @@ First field test, on a real phone at full resolution: one read right first time;
 The weak spot is a *new* part — not yet on the van, so there is nothing to be one character off, and a misread goes straight into the Add sheet. The note there says to check the number for exactly this reason.
 
 About 7MB loads on the first scan and is kept after. The labels carry customer names and addresses, so nothing is sent off the phone to read them.
+
+## Addendum: reading live
+
+The first version read one photograph. It now reads the camera feed, frame after frame, the way the ByBox app scans labels: point it at the label and it registers, with no shutter to press. The photograph stays as the fallback for a phone that will not share its camera feed.
+
+Reading many frames means it can wait for agreement. A code matching a part already on the van is taken on one read; anything else waits for two of the last three reads to agree, with the two OCR segmentation modes alternated frame to frame so the agreement is between two different readings, not one repeated. Tested with a simulated camera: the first frame read a 6 as a 0, the next read it right, and the scan acted only on the second — the retake an engineer did by hand in the field, done before they see anything. 3.4 seconds from tap to answer for a part on the van once the reader is loaded.
+
+The live view crops to the guide box before reading, which enforces the framing the measurements favoured — the top of the label, not the whole of it.
+

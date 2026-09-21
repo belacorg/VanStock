@@ -107,18 +107,40 @@ function parseLabelText(text) {
     const toks = line.split(/\s+/);
     toks.forEach((raw, ti) => {
       const clean = raw.replace(/[^0-9A-Za-z]/g, '').toUpperCase();
-      if (!GC_PATTERN.test(clean)) return;
-      if ((clean.match(/\d/g) || []).length < 4) return;
+      const anchored = ti > 0 && GC_CAPTION.test(toks[ti - 1]);
 
-      let score = 0;
-      if (ti > 0 && GC_CAPTION.test(toks[ti - 1])) score += 3;
+      // OCR sometimes reads the gap after the caption's colon as a 0 and glues
+      // it to the code: "Gc: 0612387". So seven characters straight after a GC
+      // caption, starting with a 0 or an O, are read as the last six.
+      //
+      // Only that. Dropping whichever end made six would turn a stray at the
+      // far end — 6123870 — into 123870, a confident wrong code, and because
+      // OCR is deterministic it would say so on every frame, so two reads
+      // would agree on it. And only after a caption: a bare seven-digit number
+      // starting with 0 on this label is a staff ID, and must never be
+      // trimmed into something that looks like a code.
+      const strayZero = anchored && clean.length === GC_LENGTH + 1 && /^[0O]/.test(clean);
+      const forms = GC_PATTERN.test(clean) ? [[clean, 0]]
+        : strayZero ? [[clean.slice(1), -1]]
+        : [];
+
+      for (const [code, penalty] of forms) {
+        if (!GC_PATTERN.test(code)) continue;
+        if ((code.match(/\d/g) || []).length < 4) continue;
+        score(code, raw, anchored, penalty);
+      }
+    });
+
+    function score(clean, raw, anchored, penalty) {
+      let score = penalty;
+      if (anchored) score += 3;
       if (/\d{1,2}:\d{2}/.test(raw)) score -= 5;                  // 08:27:24
       if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(line)) score -= 2;     // the date line
       const next = lines[li + 1] || '';
       if ((next.match(/[A-Za-z]{3,}/g) || []).length >= 2) score += 1;   // a Desc follows
 
       cands.push({ gc: clean, li, score });
-    });
+    }
   });
 
   cands.sort((a, b) => b.score - a.score || a.li - b.li);
@@ -157,6 +179,50 @@ function nearestPartByGc(gc, parts) {
     return diff === 1;
   });
   return close.length === 1 ? close[0] : null;
+}
+
+// ── Reading live ────────────────────────────────────────────────────────────
+//
+// Scanning off the camera feed reads frame after frame, so it can wait for
+// the reads to agree before it acts. That is the retake an engineer does by
+// hand when a 7 comes back as a 1 — done for them, before they see anything.
+//
+// A code that matches a part already on the van exactly is taken on one read:
+// for a misread to land precisely on a different code the engineer also
+// carries is vanishingly unlikely. Anything else waits for two of the last
+// three reads to agree. A near miss of a part on the van is not special-cased
+// here — it either firms up into the right code on the next frame, or two
+// frames agree on it and "is it this one?" asks as usual.
+const LIVE_WINDOW = 3;
+
+function liveVerdict(reads, parts) {
+  const recent = (reads || []).slice(-LIVE_WINDOW).filter(r => r && r.gc);
+  const last = recent[recent.length - 1];
+  if (!last) return { accept: false, tentative: null };
+
+  const gc = normaliseNumber(last.gc);
+  const onVan = (parts || []).some(p => normaliseNumber(p.number) === gc);
+  const agreeing = recent.filter(r => normaliseNumber(r.gc) === gc);
+
+  if (onVan || agreeing.length >= 2) {
+    return { accept: true, gc, desc: bestDesc(agreeing), tentative: gc };
+  }
+  return { accept: false, tentative: gc };
+}
+
+// The description the agreeing reads most often gave, longest breaking a tie —
+// a read that dropped a word is more likely than one that invented one.
+function bestDesc(reads) {
+  const counts = new Map();
+  for (const r of reads || []) {
+    const d = (r && r.desc || '').trim();
+    if (d) counts.set(d, (counts.get(d) || 0) + 1);
+  }
+  let best = null;
+  for (const [d, n] of counts) {
+    if (!best || n > best.n || (n === best.n && d.length > best.d.length)) best = { d, n };
+  }
+  return best ? best.d : null;
 }
 
 // Where a scan lands. The code comes off the print, so it can be a misread —
@@ -429,6 +495,9 @@ if (typeof module !== 'undefined' && module.exports) {
     descFromLine,
     nearestPartByGc,
     resolveScan,
+    liveVerdict,
+    bestDesc,
+    LIVE_WINDOW,
     CHASE_AFTER_DAYS,
     STALE_AFTER_DAYS,
     normaliseNumber,
