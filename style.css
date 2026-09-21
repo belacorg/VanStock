@@ -687,6 +687,14 @@ select.field-input {
 .live-btn.quiet { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.85); }
 .live-btn:active { opacity: 0.7; }
 
+.export-age {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 8px 2px 0;
+}
+.export-age.warn { color: var(--amber); }
+
 /* ── Toast ── */
 .toast {
   position: fixed;

@@ -10,6 +10,14 @@
 
 // ── State ───────────────────────────────────────────────────────────────────
 const STORE_KEY = 'vs_state';
+const BACKUPS_KEY = 'vs_backups';
+// Where a save that could not be read is set aside. Written once and never
+// overwritten, so whatever was there can still be recovered by hand.
+const UNREADABLE_KEY = 'vs_state_unreadable';
+
+// Set by loadState, so declared before it runs.
+let loadNotice = null;      // { kind: 'recovered', at } | { kind: 'unreadable' } | null
+let saveAfterLoad = false;  // a migration or a recovery produced something worth saving
 
 let state = loadState();
 let activeTab = 'find';     // find | stock | loans | settings
@@ -19,13 +27,14 @@ let partSheet = null;       // { mode: 'add'|'edit', draft: {...} } | null
 let lendSheet = null;       // { partId, to, phone, qty, on } | null
 let boxSheet = null;        // { mode: 'add'|'edit', id, label } | null
 let eraseStep = 'idle';
+let restoreConfirm = null;   // index of the automatic backup awaiting a second tap
 let showReturned = false;
 // The scan in progress. Out of `state` because it holds a photograph.
 let scanSheet = null;   // { status, message, gc, src } | null
 
 function blankState() {
   return {
-    version: 1,
+    version: DATA_VERSION,
     // Boxes come pre-named because an empty list is a decision to make before
     // the app has done anything useful. Labelling them is optional — the whole
     // point is that "box 3" already means something once the stock is in it.
@@ -41,36 +50,93 @@ function blankState() {
   };
 }
 
+// Loading is where data gets lost, if it is going to be. Three rules:
+//
+//  - A save that will not parse is never overwritten. It is set aside under
+//    its own key, and the newest automatic backup that does parse is loaded in
+//    its place. Before this, a damaged save came back as an empty van, and the
+//    next thing the engineer did wrote that empty van over the only copy.
+//  - An older shape is migrated forward (see migrateState), with a snapshot of
+//    it taken first, so an update that gets a migration wrong can be undone.
+//  - Anything unrecognised is carried through, not dropped.
 function loadState() {
+  let raw = null;
+  try { raw = localStorage.getItem(STORE_KEY); } catch (e) { return blankState(); }
+  if (!raw) return blankState();
+
+  let parsed = null;
   try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return blankState();
-    const parsed = JSON.parse(raw);
-    const base = blankState();
-    return {
-      ...base,
-      ...parsed,
-      settings: { ...base.settings, ...(parsed.settings || {}) },
-      boxes: Array.isArray(parsed.boxes) ? parsed.boxes : base.boxes,
-      parts: Array.isArray(parsed.parts) ? parsed.parts : [],
-      loans: Array.isArray(parsed.loans) ? parsed.loans : [],
-      engineers: Array.isArray(parsed.engineers) ? parsed.engineers : [],
-    };
-  } catch {
+    parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') throw new Error('not a van');
+  } catch (e) {
+    try { if (!localStorage.getItem(UNREADABLE_KEY)) localStorage.setItem(UNREADABLE_KEY, raw); } catch (e2) {}
+    for (const snap of readSnapshots()) {
+      try {
+        const data = JSON.parse(snap.json);
+        if (!looksLikeBackup(data)) continue;
+        loadNotice = { kind: 'recovered', at: snap.at };
+        saveAfterLoad = true;
+        return normaliseState(migrateState(data).state);
+      } catch (e3) { /* try the next one */ }
+    }
+    loadNotice = { kind: 'unreadable' };
     return blankState();
+  }
+
+  const m = migrateState(parsed);
+  if (m.migrated) {
+    snapshot('before-update', parsed);
+    saveAfterLoad = true;
+  }
+  return normaliseState(m.state);
+}
+
+function normaliseState(st) {
+  const base = blankState();
+  return {
+    ...base,
+    ...st,
+    settings: { ...base.settings, ...(st.settings || {}) },
+    boxes: Array.isArray(st.boxes) ? st.boxes : base.boxes,
+    parts: Array.isArray(st.parts) ? st.parts : [],
+    loans: Array.isArray(st.loans) ? st.loans : [],
+    engineers: Array.isArray(st.engineers) ? st.engineers : [],
+  };
+}
+
+// ── Automatic backups ──
+function readSnapshots() {
+  try {
+    const list = JSON.parse(localStorage.getItem(BACKUPS_KEY) || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
   }
 }
 
-// Nothing off a label is kept except the GC number and the description
-// (ADR-0010). Builds before that one stored every staff ID the barcode reader
-// met — colleagues' pay numbers — and the engineer's own. Strip both from any
-// phone that still has them; boot saves the result so they are gone for good,
-// not merely ignored.
-function purgeLabelData(st) {
-  let purged = false;
-  if ('knownIds' in st) { delete st.knownIds; purged = true; }
-  if (st.settings && 'staffId' in st.settings) { delete st.settings.staffId; purged = true; }
-  return purged;
+// The storage quota is shared with CTAP Tracker, which lives at the same
+// address. If it is full, the oldest copies are given up first rather than
+// the write failing outright.
+function writeSnapshots(list) {
+  for (let keep = list.length; keep > 0; keep--) {
+    try { localStorage.setItem(BACKUPS_KEY, JSON.stringify(list.slice(0, keep))); return true; } catch (e) {}
+  }
+  return false;
+}
+
+function snapshot(reason, data) {
+  const d = data || state;
+  if (!d || !Array.isArray(d.parts)) return;
+  writeSnapshots(addSnapshot(readSnapshots(), d, new Date().toISOString(), reason));
+}
+
+// One a day, taken as the app opens — so it holds how the van stood at the
+// end of the last day it was used.
+function snapshotDaily() {
+  if (!state.parts.length && !state.loans.length) return;
+  const newest = readSnapshots()[0];
+  if (newest && String(newest.at).slice(0, 10) === new Date().toISOString().slice(0, 10)) return;
+  snapshot('daily');
 }
 
 function save() {
@@ -220,6 +286,7 @@ function buildFind() {
   const typed = query.trim();
 
   return `
+    ${buildLoadNotice()}
     <div class="find-wrap">
       <div class="find-field">
         <input class="find-input" id="find-input" type="search" inputmode="search"
@@ -569,21 +636,26 @@ function buildSettings() {
       </div>
     </div>
 
-    <div class="section-label">Your list</div>
+    <div class="section-label">Keeping your list</div>
     <div class="card">
-      <button class="btn btn-quiet btn-block" data-export="1">Back up to a file</button>
-      <div class="field-hint" style="margin-bottom:14px">Saves the whole list as a file you can keep or send to yourself. Do this before you change phone — there is no account holding a copy.</div>
-      <button class="btn btn-quiet btn-block" data-import="1">Restore from a file</button>
+      <button class="btn btn-primary btn-block" data-export="1">Save a copy off this phone</button>
+      ${exportAgeLine()}
+      <div class="field-hint">Everything in this app lives on this phone. A copy in iCloud Drive, Files or your email is the only thing that survives losing it or swapping phones.</div>
+      <button class="btn btn-quiet btn-block" data-import="1" style="margin-top:14px">Restore from a file</button>
       <input type="file" id="import-file" accept="application/json,.json" style="display:none">
-      <div class="field-hint">Replaces everything currently on the list.</div>
+      <div class="field-hint">Replaces the list on this phone. The one it replaces goes into Automatic backups first, so a wrong file can be undone.</div>
     </div>
+
+    <div class="section-label">Automatic backups</div>
+    ${buildSnapshotList()}
+    <div class="field-hint" style="margin:6px 2px 0">Kept on this phone without asking: one a day for the last few days, and one before every update or restore. They cover the app going wrong — not the phone going, which is what a copy off it is for.</div>
 
     <div class="section-label">Danger</div>
     <div class="card">
       ${eraseStep === 'idle' ? `
         <button class="btn btn-danger btn-block" data-erase="ask">Erase everything</button>
       ` : `
-        <div class="field-hint" style="margin:0 0 12px">This wipes the stock list, the boxes and the loan history on this phone. It cannot be undone.</div>
+        <div class="field-hint" style="margin:0 0 12px">This wipes the stock list, the boxes, the loan history and the automatic backups on this phone. It cannot be undone — a copy you saved off the phone is untouched.</div>
         <div class="modal-btns" style="margin:0">
           <button class="btn-cancel" data-erase="cancel">Keep it</button>
           <button class="btn-confirm" style="background:var(--red)" data-erase="do">Erase</button>
@@ -596,6 +668,61 @@ function buildSettings() {
       Built alongside CTAP Tracker. Nothing leaves this device.
     </div>
   `;
+}
+
+function exportAgeLine() {
+  const last = state.settings.lastExportedOn;
+  const hasStock = state.parts.length > 0;
+  if (!last) {
+    return hasStock
+      ? '<div class="export-age warn">Never saved off this phone</div>'
+      : '';
+  }
+  const days = daysBetween(last, todayKey());
+  const tone = hasStock && days > 30 ? ' warn' : '';
+  return `<div class="export-age${tone}">Last saved off this phone ${dayPhrase(last, todayKey())}</div>`;
+}
+
+function snapshotLabel(snap) {
+  const d = new Date(snap.at);
+  const when = Number.isNaN(d.getTime()) ? '' : dayPhrase(todayKey(d), todayKey()) + ', ' +
+    d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const why = { 'before-update': 'Before an update', 'before-restore': 'Before a restore', daily: '' }[snap.reason] || '';
+  const label = (why ? why + ' · ' : '') + when;
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function buildSnapshotList() {
+  const snaps = readSnapshots();
+  if (!snaps.length) {
+    return '<div class="card"><div class="field-hint" style="margin:0">None yet. The first is taken the next time the app opens with something on the list.</div></div>';
+  }
+  return `<div class="card flush">${snaps.map((snap, i) => {
+    const sum = snapshotSummary(snap);
+    const confirming = restoreConfirm === i;
+    return `
+      <div class="row" style="cursor:default">
+        <span class="row-main">
+          <span class="row-title">${esc(snapshotLabel(snap))}</span>
+          <span class="row-sub">${sum.lines} line${sum.lines === 1 ? '' : 's'} &middot; ${sum.onBoard} on board</span>
+        </span>
+        <span class="row-right">
+          <button class="btn ${confirming ? 'btn-primary' : 'btn-quiet'}" data-restore-snap="${i}" style="padding:7px 12px;font-size:0.78rem">${confirming ? 'Tap to confirm' : 'Restore'}</button>
+        </span>
+      </div>`;
+  }).join('')}</div>`;
+}
+
+function buildLoadNotice() {
+  if (!loadNotice) return '';
+  const body = loadNotice.kind === 'recovered'
+    ? `Your saved list couldn't be read this time, so the app has loaded the automatic backup from ${esc(snapshotLabel({ at: loadNotice.at, reason: 'daily' }))}. The damaged copy has been set aside, not deleted.`
+    : "Your saved list couldn't be read, and there was no automatic backup to fall back on. The damaged copy has been set aside, not deleted — restore a copy you saved off the phone from Settings.";
+  return `
+    <div class="demo-banner">
+      <b>Recovered.</b> ${body}
+      <div style="margin-top:8px"><button class="btn-link" data-dismiss-notice="1">Got it</button></div>
+    </div>`;
 }
 
 // ── Part sheet ──────────────────────────────────────────────────────────────
@@ -1298,33 +1425,76 @@ function writeOffLoan(loanId) {
   renderKeepingScroll();
 }
 
-function exportBackup() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+// A copy off the phone is the only thing that survives losing the phone.
+// On an iPhone the share sheet is how a file gets anywhere useful — iCloud
+// Drive, Files, an email to yourself — where a download link inside a home-
+// screen app goes nowhere much. The download stays as the fallback.
+async function exportBackup() {
+  const name = `van-stock-${todayKey()}.json`;
+  const json = JSON.stringify(state, null, 2);
+  let file = null;
+  try { file = new File([json], name, { type: 'application/json' }); } catch (e) {}
+
+  if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: 'Van Stock backup' });
+      markExported();
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;   // they changed their mind
+    }
+  }
+
+  const blob = new Blob([json], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `van-stock-${todayKey()}.json`;
+  a.download = name;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  toast('Backed up');
+  markExported();
 }
 
+function markExported() {
+  state.settings.lastExportedOn = todayKey();
+  save();
+  toast('Copy saved');
+  renderKeepingScroll();
+}
+
+// Replacing the van with a file is the one action that can throw away weeks
+// of entries at a tap — the wrong file, an old one. So the van as it stands
+// goes into the automatic backups first, and the restore can be undone.
 function importBackup(file) {
   const reader = new FileReader();
   reader.onload = () => {
-    try {
-      const parsed = JSON.parse(String(reader.result));
-      if (!parsed || !Array.isArray(parsed.parts)) throw new Error('not a Van Stock backup');
-      localStorage.setItem(STORE_KEY, JSON.stringify(parsed));
-      state = loadState();
-      toast('Restored');
-      render();
-    } catch (e) {
-      toast("That file isn't a Van Stock backup");
-    }
+    let parsed = null;
+    try { parsed = JSON.parse(String(reader.result)); } catch (e) {}
+    if (!looksLikeBackup(parsed)) { toast("That file isn't a Van Stock backup"); return; }
+    replaceVan(parsed, 'Restored — the list it replaced is in Automatic backups');
   };
   reader.readAsText(file);
+}
+
+function restoreSnapshot(index) {
+  const snap = readSnapshots()[index];
+  if (!snap) return;
+  let data = null;
+  try { data = JSON.parse(snap.json); } catch (e) {}
+  if (!looksLikeBackup(data)) { toast("That backup couldn't be read"); return; }
+  replaceVan(data, 'Restored — the list it replaced is in Automatic backups');
+}
+
+function replaceVan(data, message) {
+  snapshot('before-restore');
+  state = normaliseState(migrateState(data).state);
+  save();
+  restoreConfirm = null;
+  loadNotice = null;
+  applyTheme();
+  toast(message);
+  render();
 }
 
 function applyTheme() {
@@ -1508,6 +1678,12 @@ function attachListeners() {
   });
 
   on('[data-export]', 'click', exportBackup);
+  on('[data-restore-snap]', 'click', e => {
+    const i = Number(e.currentTarget.dataset.restoreSnap);
+    if (restoreConfirm === i) restoreSnapshot(i);
+    else { restoreConfirm = i; renderKeepingScroll(); }
+  });
+  on('[data-dismiss-notice]', 'click', () => { loadNotice = null; render(); });
   on('[data-import]', 'click', () => {
     const input = document.getElementById('import-file');
     if (input) input.click();
@@ -1523,7 +1699,12 @@ function attachListeners() {
     if (step === 'ask') eraseStep = 'confirm';
     if (step === 'cancel') eraseStep = 'idle';
     if (step === 'do') {
-      try { localStorage.removeItem(STORE_KEY); } catch {}
+      try {
+        localStorage.removeItem(STORE_KEY);
+        localStorage.removeItem(BACKUPS_KEY);
+        localStorage.removeItem(UNREADABLE_KEY);
+      } catch {}
+      loadNotice = null;
       state = blankState();
       eraseStep = 'idle';
       query = '';
@@ -1565,7 +1746,11 @@ const ICON_CAMERA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 const ICON_COG    = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.6.76 1 1.4 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
 
 // ── Boot ────────────────────────────────────────────────────────────────────
-if (purgeLabelData(state)) save();
+if (saveAfterLoad) save();
+snapshotDaily();
+// Ask the browser to keep this site's storage rather than clear it when the
+// phone is short of space. Granted or not, the backups above still stand.
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) {}
 document.addEventListener('visibilitychange', () => { if (document.hidden) closeLiveScan(); });
 applyTheme();
 render();

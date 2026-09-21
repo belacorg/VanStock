@@ -414,6 +414,77 @@ function boxLabel(boxes, boxId) {
   return box.label || '';
 }
 
+// ── Keeping the data ────────────────────────────────────────────────────────
+//
+// An engineer types a hundred parts in once. Losing them to an update is the
+// one failure that would end the app's use on the spot, so the stored shape is
+// versioned and every change to it is a migration, run in order, from any
+// version ever shipped — never a rewrite that assumes the latest shape.
+//
+// Unknown fields are carried through untouched. An older copy of the app —
+// one a service worker served from cache — must be able to load data written
+// by a newer one and save it back without dropping what it does not
+// understand.
+const DATA_VERSION = 2;
+
+const MIGRATIONS = {
+  // v1 → v2 (ADR-0010): nothing off a label but the GC number and the
+  // description. v1 kept the staff ID off every barcode it read, and the
+  // engineer's own. Removed, and nothing else touched.
+  1: st => {
+    delete st.knownIds;
+    if (st.settings) delete st.settings.staffId;
+    return st;
+  },
+};
+
+function migrateState(parsed) {
+  const st = JSON.parse(JSON.stringify(parsed || {}));   // never mutate the caller's copy
+  const from = Number.isInteger(st.version) && st.version > 0 ? st.version : 1;
+  let v = from;
+  // A version from the future is left alone. Migrating down is not a thing;
+  // loading it as it stands and saving it back unchanged is.
+  while (v < DATA_VERSION) {
+    const step = MIGRATIONS[v];
+    if (step) step(st);
+    v++;
+  }
+  if (from < DATA_VERSION) st.version = DATA_VERSION;
+  return { state: st, from, to: Math.max(from, DATA_VERSION), migrated: from < DATA_VERSION };
+}
+
+// Snapshots of the whole van, kept on the phone. They protect against the
+// app — a bad update, a damaged save, the wrong file restored — not against
+// the phone itself going: they live in the same storage as the data. That is
+// what saving a copy off the phone is for.
+const MAX_SNAPSHOTS = 6;
+
+function addSnapshot(snaps, data, at, reason) {
+  const list = Array.isArray(snaps) ? snaps.slice() : [];
+  const json = JSON.stringify(data);
+  // An identical copy of the last one protects against nothing and costs room
+  // in a storage quota this app shares with CTAP Tracker.
+  if (list.length && list[0].json === json) return list;
+  list.unshift({ at, reason, json });
+  return list.slice(0, MAX_SNAPSHOTS);
+}
+
+function snapshotSummary(snap) {
+  try {
+    const d = JSON.parse(snap.json);
+    const parts = Array.isArray(d.parts) ? d.parts : [];
+    return { lines: parts.length, onBoard: parts.reduce((n, p) => n + (p.qty || 0), 0) };
+  } catch (e) {
+    return { lines: 0, onBoard: 0 };
+  }
+}
+
+// Whether a file someone picked is plausibly a Van Stock backup at all, before
+// it is allowed anywhere near the van it would replace.
+function looksLikeBackup(parsed) {
+  return !!parsed && typeof parsed === 'object' && Array.isArray(parsed.parts);
+}
+
 // ── Demo van ────────────────────────────────────────────────────────────────
 //
 // A van with something in it, for looking at the app before there is any real
@@ -512,6 +583,13 @@ if (typeof module !== 'undefined' && module.exports) {
     usageState,
     groupByMake,
     boxLabel,
+    DATA_VERSION,
+    MIGRATIONS,
+    migrateState,
+    MAX_SNAPSHOTS,
+    addSnapshot,
+    snapshotSummary,
+    looksLikeBackup,
     shiftDays,
     demoVan,
   };
