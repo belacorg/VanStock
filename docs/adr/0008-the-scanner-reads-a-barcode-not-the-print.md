@@ -1,7 +1,7 @@
 # ADR-0008: The scanner reads a barcode, not the print
 
 ## Status
-Accepted
+Superseded by ADR-0009 — the barcode read nothing in the field.
 
 ## Context
 Putting a hundred parts on the list by hand is the thing most likely to stop this app ever being used, so the camera earns its place on data entry before it earns it on lookup.
